@@ -14,7 +14,7 @@ export const Footer = () => {
               </div>
               <div>
                 <span className="font-bold text-lg text-gradient-primary">AgriTrace</span>
-                <p className="text-xs text-muted-foreground">Government of Odisha</p>
+                <p className="text-xs text-muted-foreground"></p>
               </div>
             </div>
             <p className="text-sm text-muted-foreground mb-4 max-w-md">
@@ -78,7 +78,7 @@ export const Footer = () => {
 
         <div className="border-t pt-8 mt-8 flex flex-col md:flex-row justify-between items-center">
           <p className="text-xs text-muted-foreground">
-            © 2024 Government of Odisha. All rights reserved. AgriTrace Platform.
+            © 2024 . All rights reserved. AgriTrace Platform.
           </p>
           <div className="flex items-center space-x-4 mt-4 md:mt-0">
             <span className="text-xs text-muted-foreground flex items-center">

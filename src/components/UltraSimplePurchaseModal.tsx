@@ -779,6 +779,76 @@ export const UltraSimplePurchaseModal: React.FC<UltraSimplePurchaseModalProps> =
         }
       }
 
+      // Create delivery request
+      try {
+        const { createDeliveryRequest } = await import('@/services/deliveryService');
+        
+        // Get seller's location
+        let sourceLocation = { lat: 0, lng: 0, address: 'Unknown', ownerId: sellerId || '' };
+        if (sellerId) {
+          try {
+            const { data: sellerProfile } = await supabase
+              .from('profiles')
+              .select('farm_location, id')
+              .eq('id', sellerId)
+              .single();
+            
+            if (sellerProfile?.farm_location) {
+              // Try to parse location if it's JSON, otherwise use as address
+              try {
+                const parsed = JSON.parse(sellerProfile.farm_location);
+                sourceLocation = {
+                  lat: parsed.lat || 0,
+                  lng: parsed.lng || 0,
+                  address: parsed.address || sellerProfile.farm_location,
+                  ownerId: sellerId,
+                };
+              } catch {
+                sourceLocation = {
+                  lat: 0,
+                  lng: 0,
+                  address: sellerProfile.farm_location,
+                  ownerId: sellerId,
+                };
+              }
+            }
+          } catch (error) {
+            console.warn('Could not fetch seller location:', error);
+          }
+        }
+
+        // Get buyer's delivery address
+        const destinationLocation = {
+          lat: 0, // Will be geocoded later
+          lng: 0,
+          address: address,
+          ownerId: profile?.id || '',
+        };
+
+        // Get batch details for harvest date and freshness
+        const { data: batchDetails } = await supabase
+          .from('batches')
+          .select('harvest_date, freshness_duration')
+          .eq('id', batchId)
+          .single();
+
+        if (batchDetails) {
+          await createDeliveryRequest({
+            transactionId: transactionResult?.id,
+            batchId: batchId,
+            sourceLocation,
+            destinationLocation,
+            quantityKg: quantity,
+            harvestDate: batchDetails.harvest_date,
+            freshnessDuration: batchDetails.freshness_duration || 7,
+          });
+          console.log('✅ Delivery request created');
+        }
+      } catch (deliveryError) {
+        console.warn('⚠️ Failed to create delivery request:', deliveryError);
+        // Don't fail the purchase if delivery request creation fails
+      }
+
       onPurchaseComplete();
       onClose();
       toast({

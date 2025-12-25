@@ -1,3 +1,4 @@
+import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Navigate, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
@@ -8,10 +9,24 @@ interface ProtectedRouteProps {
 }
 
 export const ProtectedRoute = ({ children, allowedUserTypes }: ProtectedRouteProps) => {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const location = useLocation();
+  const [profileLoading, setProfileLoading] = React.useState(true);
 
-  if (loading) {
+  // Wait a bit for profile to load if user exists but profile doesn't
+  React.useEffect(() => {
+    if (user && !profile && !loading) {
+      // Give profile a chance to load (profile loads asynchronously)
+      const timer = setTimeout(() => {
+        setProfileLoading(false);
+      }, 1000); // Wait 1 second for profile to load
+      return () => clearTimeout(timer);
+    } else {
+      setProfileLoading(false);
+    }
+  }, [user, profile, loading]);
+
+  if (loading || profileLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -26,14 +41,15 @@ export const ProtectedRoute = ({ children, allowedUserTypes }: ProtectedRoutePro
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Get user type from user metadata
+  // Priority: 1. Profile from database, 2. User metadata, 3. Email fallback
+  const userTypeFromProfile = profile?.user_type;
   const userTypeFromMetadata = user.user_metadata?.user_type;
   
-  // Temporary fixes for users without user_type set
-  let effectiveUserType = userTypeFromMetadata;
+  // Use profile first (most reliable), then metadata, then fallback
+  let effectiveUserType = userTypeFromProfile || userTypeFromMetadata;
   
-  if (!userTypeFromMetadata) {
-    // Check email to determine user type
+  if (!effectiveUserType) {
+    // Check email to determine user type (temporary fallback)
     if (user?.email === 'realjarirkhann@gmail.com') {
       effectiveUserType = 'distributor';
     } else if (user?.email === 'kjarir23@gmail.com') {
@@ -44,9 +60,33 @@ export const ProtectedRoute = ({ children, allowedUserTypes }: ProtectedRoutePro
     }
   }
   
-  if (allowedUserTypes && effectiveUserType && !allowedUserTypes.includes(effectiveUserType)) {
-    return <Navigate to="/unauthorized" replace />;
+  // Log for debugging
+  console.log('🔐 ProtectedRoute check:', {
+    path: location.pathname,
+    effectiveUserType,
+    allowedUserTypes,
+    fromProfile: userTypeFromProfile,
+    fromMetadata: userTypeFromMetadata,
+    profileExists: !!profile,
+    profileId: profile?.id,
+    userEmail: user?.email
+  });
+  
+  // Check if user type is allowed
+  if (allowedUserTypes && allowedUserTypes.length > 0) {
+    if (!effectiveUserType || !allowedUserTypes.includes(effectiveUserType)) {
+      console.error('🚫 Access denied:', {
+        effectiveUserType,
+        allowedUserTypes,
+        fromProfile: userTypeFromProfile,
+        fromMetadata: userTypeFromMetadata,
+        profile: profile,
+        path: location.pathname
+      });
+      return <Navigate to="/unauthorized" replace />;
+    }
   }
 
+  console.log('✅ Access granted:', { effectiveUserType, allowedUserTypes });
   return <>{children}</>;
 };

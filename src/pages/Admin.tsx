@@ -150,7 +150,7 @@ export const Admin = () => {
       <div className="container mx-auto px-4 max-w-7xl">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Admin Dashboard</h1>
-          <p className="text-muted-foreground">Government of Odisha - AgriTrace Platform Management</p>
+          <p className="text-muted-foreground"> - AgriTrace Platform Management</p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">

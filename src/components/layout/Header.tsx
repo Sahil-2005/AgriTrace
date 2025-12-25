@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Menu, X, Leaf, User, ShoppingCart, Shield, LogIn, LogOut, Wallet, Camera } from 'lucide-react';
+import { Menu, X, Leaf, User, ShoppingCart, Shield, LogIn, LogOut, Wallet, Camera, Truck, Package, MapPin } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWeb3 } from '@/contexts/Web3Context';
 import {
@@ -15,19 +15,20 @@ import {
 export const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [userType, setUserType] = useState<string | null>(null);
-  const { user, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const { isConnected, connectWallet, account, disconnectWallet } = useWeb3();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (user) {
-      // Get user type from user metadata
+      // Get user type from profile first, then fallback to metadata
+      const userTypeFromProfile = profile?.user_type;
       const userTypeFromMetadata = user.user_metadata?.user_type;
       
       // Temporary fixes for users without user_type set
-      let effectiveUserType = userTypeFromMetadata;
+      let effectiveUserType = userTypeFromProfile || userTypeFromMetadata;
       
-      if (!userTypeFromMetadata) {
+      if (!effectiveUserType) {
         // Check email to determine user type
         if (user?.email === 'realjarirkhann@gmail.com') {
           effectiveUserType = 'distributor';
@@ -43,7 +44,7 @@ export const Header = () => {
     } else {
       setUserType(null);
     }
-  }, [user]);
+  }, [user, profile]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -60,7 +61,7 @@ export const Header = () => {
           </div>
           <div className="flex flex-col">
             <span className="font-bold text-lg text-gradient-primary">AgriTrace</span>
-            <span className="text-xs text-muted-foreground">Government of Odisha</span>
+            <span className="text-xs text-muted-foreground"></span>
           </div>
         </Link>
 
@@ -105,9 +106,9 @@ export const Header = () => {
           <Link to="/track" className="text-sm font-medium text-muted-foreground hover:text-primary transition-smooth">
             Track Products
           </Link>
-          <Link to="/verification" className="text-sm font-medium text-muted-foreground hover:text-primary transition-smooth">
+          {/* <Link to="/verification" className="text-sm font-medium text-muted-foreground hover:text-primary transition-smooth">
             Certificate Verification
-          </Link>
+          </Link> */}
           <Link to="/about" className="text-sm font-medium text-muted-foreground hover:text-primary transition-smooth">
             About
           </Link>
@@ -170,13 +171,36 @@ export const Header = () => {
                     Register Batch
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link to="/admin">
-                    <Shield className="mr-2 h-4 w-4" />
-                    Admin Panel
-                  </Link>
-                </DropdownMenuItem>
+                {/* Logistics Menu Items - Only for drivers */}
+                {userType === 'driver' && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link to="/driver-dashboard">
+                        <Truck className="mr-2 h-4 w-4" />
+                        Driver Dashboard
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link to="/my-deliveries">
+                        <Package className="mr-2 h-4 w-4" />
+                        My Deliveries
+                      </Link>
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {/* Admin Panel - Only for admin */}
+                {userType === 'admin' && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild>
+                      <Link to="/admin">
+                        <Shield className="mr-2 h-4 w-4" />
+                        Admin Panel
+                      </Link>
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleSignOut}>
                   <LogOut className="mr-2 h-4 w-4" />

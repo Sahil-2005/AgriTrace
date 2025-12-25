@@ -33,7 +33,7 @@ export const Landing = () => {
           <div className="max-w-4xl mx-auto text-center text-primary-foreground">
             <Badge variant="outline" className="mb-6 bg-white/10 text-white border-white/20">
               <Globe className="w-4 h-4 mr-2" />
-              Government of Odisha Initiative
+               Initiative
             </Badge>
             <h1 className="text-4xl md:text-6xl font-bold mb-6 leading-tight">
               Transparent Agricultural

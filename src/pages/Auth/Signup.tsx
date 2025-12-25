@@ -20,7 +20,8 @@ import {
   Tractor,
   Store,
   Users,
-  Shield
+  Shield,
+  Truck
 } from 'lucide-react';
 
 export const Signup = () => {
@@ -65,9 +66,14 @@ export const Signup = () => {
         });
       } else {
         console.log('✅ Signup successful:', data);
+        
+        // Driver profile will be auto-created by database trigger when profile is created with user_type='driver'
+        
         toast({
           title: "Account created successfully!",
-          description: "Please check your email to verify your account.",
+          description: selectedRole === 'driver' 
+            ? "Please check your email to verify your account. After login, complete your driver registration with vehicle details."
+            : "Please check your email to verify your account.",
         });
         navigate('/login');
       }
@@ -105,6 +111,13 @@ export const Signup = () => {
       description: 'Buy from distributors and sell to consumers',
       icon: Store,
       color: 'text-accent'
+    },
+    {
+      id: 'driver',
+      label: 'Driver',
+      description: 'Deliver agricultural products efficiently',
+      icon: Truck,
+      color: 'text-blue-600'
     },
     {
       id: 'helper',
@@ -208,12 +221,12 @@ export const Signup = () => {
                 </div>
               </div>
 
-              {(selectedRole === 'farmer' || selectedRole === 'distributor' || selectedRole === 'retailer') && (
+              {(selectedRole === 'farmer' || selectedRole === 'distributor' || selectedRole === 'retailer' || selectedRole === 'driver') && (
                 <div className="space-y-2">
                   <Label htmlFor="farmLocation" className="text-sm">Location</Label>
                   <Input
                     id="farmLocation"
-                    placeholder="District"
+                    placeholder={selectedRole === 'driver' ? 'Your location' : 'District'}
                     value={farmLocation}
                     onChange={(e) => setFarmLocation(e.target.value)}
                     className="h-9"

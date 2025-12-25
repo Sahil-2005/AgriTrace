@@ -31,6 +31,9 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import HelperDesk from "./pages/HelperDesk";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
+import { DriverDashboard } from "./pages/DriverDashboard";
+import { MyDeliveries } from "./pages/MyDeliveries";
+import { BecomeDriver } from "./pages/BecomeDriver";
 
 const queryClient = new QueryClient();
 
@@ -126,6 +129,23 @@ const App = () => (
                   <Route path="/helper-desk" element={
                     <ProtectedRoute allowedUserTypes={['helper', 'admin']}>
                       <HelperDesk />
+                    </ProtectedRoute>
+                  } />
+                  
+                  {/* Logistics Routes */}
+                  <Route path="/driver-dashboard" element={
+                    <ProtectedRoute allowedUserTypes={['driver']}>
+                      <DriverDashboard />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/my-deliveries" element={
+                    <ProtectedRoute>
+                      <MyDeliveries />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/become-driver" element={
+                    <ProtectedRoute>
+                      <BecomeDriver />
                     </ProtectedRoute>
                   } />
                   

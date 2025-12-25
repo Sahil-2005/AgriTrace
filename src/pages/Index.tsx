@@ -22,7 +22,7 @@ const Index = () => {
       <div className="text-center space-y-6">
         <Badge variant="outline" className="mb-4">
           <Globe className="w-4 h-4 mr-2" />
-          Government of Odisha Digital Initiative
+           Digital Initiative
         </Badge>
         <h1 className="text-4xl md:text-5xl font-bold">About AgriTrace</h1>
         <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
@@ -197,9 +197,9 @@ const Index = () => {
           <div className="flex items-center justify-center w-16 h-16 rounded-full gradient-primary mx-auto mb-6">
             <Award className="h-8 w-8 text-primary-foreground" />
           </div>
-          <h3 className="text-2xl font-bold mb-4">Government of Odisha Partnership</h3>
+          <h3 className="text-2xl font-bold mb-4"> Partnership</h3>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            AgriTrace is an official initiative of the Government of Odisha, developed in partnership 
+            AgriTrace is an official initiative of the , developed in partnership 
             with leading technology providers to ensure the highest standards of security, reliability, 
             and accessibility for all farmers across the state.
           </p>

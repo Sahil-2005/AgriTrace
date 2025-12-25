@@ -282,7 +282,7 @@ export class FinalGroupManager {
     // Subtitle
     doc.setFontSize(12);
     doc.setFont('helvetica', 'normal');
-    doc.text('Government of Odisha - Department of Agriculture & Farmers Empowerment', pageWidth / 2, 32, { align: 'center' });
+    doc.text(' - Department of Agriculture & Farmers Empowerment', pageWidth / 2, 32, { align: 'center' });
     
     // Certificate number and date
     doc.setTextColor(...textColor);
@@ -374,7 +374,7 @@ export class FinalGroupManager {
     yPosition += 10;
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    doc.text('This certificate is issued under the authority of the Government of Odisha', 30, yPosition);
+    doc.text('This certificate is issued under the authority of the ', 30, yPosition);
     yPosition += 6;
     doc.setFont('helvetica', 'normal');
     doc.text('and certifies the authenticity and traceability of the above-mentioned agricultural produce.', 30, yPosition);
@@ -392,7 +392,7 @@ export class FinalGroupManager {
     doc.setFont('helvetica', 'normal');
     doc.text('Authorized Signatory', 50, yPosition + 8);
     doc.text('Department of Agriculture', 50, yPosition + 12);
-    doc.text('Government of Odisha', 50, yPosition + 16);
+    doc.text('', 50, yPosition + 16);
     
     doc.text('Digital Verification', pageWidth - 120, yPosition + 8);
     doc.text('Group ID', pageWidth - 120, yPosition + 12);
@@ -469,7 +469,7 @@ export class FinalGroupManager {
     // Subtitle
     doc.setFontSize(12);
     doc.setFont('helvetica', 'normal');
-    doc.text('Government of Odisha - Department of Agriculture & Farmers Empowerment', pageWidth / 2, 32, { align: 'center' });
+    doc.text(' - Department of Agriculture & Farmers Empowerment', pageWidth / 2, 32, { align: 'center' });
     
     // Certificate number and date
     doc.setTextColor(...textColor);
@@ -561,7 +561,7 @@ export class FinalGroupManager {
     yPosition += 10;
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    doc.text('This transaction is recorded under the authority of the Government of Odisha', 30, yPosition);
+    doc.text('This transaction is recorded under the authority of the ', 30, yPosition);
     yPosition += 6;
     doc.setFont('helvetica', 'normal');
     doc.text('and forms part of the complete supply chain traceability record.', 30, yPosition);
@@ -579,7 +579,7 @@ export class FinalGroupManager {
     doc.setFont('helvetica', 'normal');
     doc.text('Authorized Signatory', 50, yPosition + 8);
     doc.text('Department of Agriculture', 50, yPosition + 12);
-    doc.text('Government of Odisha', 50, yPosition + 16);
+    doc.text('', 50, yPosition + 16);
     
     doc.text('Digital Verification', pageWidth - 120, yPosition + 8);
     doc.text('Group ID', pageWidth - 120, yPosition + 12);

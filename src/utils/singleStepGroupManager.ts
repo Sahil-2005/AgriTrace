@@ -274,12 +274,26 @@ export class SingleStepGroupManager {
           // Verify group association
           if (responseGroupId === groupId) {
             console.log(`✅ SINGLE-STEP SUCCESS! File ${fileName} uploaded directly to group ${groupId}`);
-            console.log(`IPFS Hash: ${ipfsHash}`);
+            console.log(`✅ IPFS Hash: ${ipfsHash}`);
+            console.log(`✅ Response Group ID: ${responseGroupId}`);
             
             // Store file reference in database for verification system
             await this.storeFileReference(groupId, fileName, ipfsHash, fileBlob.size, metadata);
+            
+            // CRITICAL: Verify file was actually added to group by checking group contents
+            try {
+              await this.verifyFileInGroup(groupId, ipfsHash);
+            } catch (verifyError) {
+              console.warn('⚠️ File verification failed (non-critical):', verifyError);
+            }
           } else {
-            console.log(`⚠️ File uploaded but group_id mismatch. Expected: ${groupId}, Got: ${responseGroupId}`);
+            console.error(`❌ CRITICAL: File uploaded but group_id mismatch!`);
+            console.error(`❌ Expected Group ID: ${groupId}`);
+            console.error(`❌ Got Group ID: ${responseGroupId}`);
+            console.error(`❌ File might not be in the correct group!`);
+            
+            // Still store reference but log the issue
+            await this.storeFileReference(groupId, fileName, ipfsHash, fileBlob.size, metadata);
           }
           
           return ipfsHash;
@@ -448,10 +462,12 @@ export class SingleStepGroupManager {
 
   /**
    * Verify if a group exists in Pinata
+   * Tries both public and private endpoints since groups can be either
    */
   private async verifyGroupExists(groupId: string): Promise<boolean> {
     try {
-      const response = await fetch(`https://api.pinata.cloud/v3/groups/${groupId}`, {
+      // Try public groups endpoint first (most groups are public)
+      let response = await fetch(`https://api.pinata.cloud/v3/groups/public/${groupId}`, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${PINATA_CONFIG.jwt}`,
@@ -459,17 +475,40 @@ export class SingleStepGroupManager {
       });
 
       if (response.ok) {
-        console.log(`✅ Group ${groupId} exists`);
+        console.log(`✅ Group ${groupId} exists (public)`);
         return true;
-      } else if (response.status === 404) {
-        console.warn(`⚠️ Group ${groupId} not found`);
-        return false;
+      }
+
+      // If not found in public, try private endpoint
+      if (response.status === 404) {
+        console.log(`🔍 Group ${groupId} not found in public, checking private...`);
+        response = await fetch(`https://api.pinata.cloud/v3/groups/${groupId}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${PINATA_CONFIG.jwt}`,
+          },
+        });
+
+        if (response.ok) {
+          console.log(`✅ Group ${groupId} exists (private)`);
+          return true;
+        }
+      }
+
+      // If both fail, log but don't fail - group might still exist
+      if (response.status === 404) {
+        console.warn(`⚠️ Group ${groupId} not found in public or private endpoints`);
+        console.warn(`⚠️ This might be a false negative - group might still exist`);
       } else {
         console.warn(`⚠️ Error checking group ${groupId}: ${response.status}`);
-        return false;
       }
+      
+      // Return false but don't block upload - verification might be wrong
+      return false;
     } catch (error) {
       console.error('Error verifying group:', error);
+      console.warn('⚠️ Group verification failed, but upload will proceed anyway');
+      // Return false but don't block - verification failure shouldn't prevent upload
       return false;
     }
   }
@@ -491,18 +530,29 @@ export class SingleStepGroupManager {
     }
   ): Promise<{ pdfBlob: Blob; ipfsHash: string } | null> {
     try {
-      // Verify group exists before attempting upload
-      const groupExists = await this.verifyGroupExists(groupId);
+      console.log('🔍 DEBUG: Starting purchase certificate upload...');
+      console.log('🔍 DEBUG: Group ID:', groupId);
+      console.log('🔍 DEBUG: Purchase Data:', purchaseData);
       
-      if (!groupExists) {
-        console.warn(`⚠️ Group ${groupId} does not exist. Skipping purchase certificate upload.`);
-        console.warn('⚠️ Purchase will continue without certificate upload.');
-        // Return null instead of throwing error - don't fail the purchase
-        return null;
+      // CRITICAL: Try to verify group exists, but don't fail if verification fails
+      // The group might exist but API call might fail, so we'll try upload anyway
+      try {
+        const groupExists = await this.verifyGroupExists(groupId);
+        if (!groupExists) {
+          console.warn(`⚠️ Group ${groupId} verification failed, but attempting upload anyway...`);
+          console.warn('⚠️ Group might exist but API verification failed. Proceeding with upload.');
+        } else {
+          console.log(`✅ Group ${groupId} verified to exist`);
+        }
+      } catch (verifyError) {
+        console.warn('⚠️ Group verification error (non-fatal):', verifyError);
+        console.warn('⚠️ Proceeding with upload anyway - group might still exist');
       }
 
       // Generate PDF
+      console.log('🔍 DEBUG: Generating purchase PDF...');
       const pdfBlob = await this.createPurchasePDF(purchaseData, groupId);
+      console.log('✅ PDF generated, size:', pdfBlob.size, 'bytes');
 
       // Upload to group in SINGLE STEP
       const fileName = `purchase_certificate_${purchaseData.batchId}_${Date.now()}.pdf`;
@@ -526,12 +576,34 @@ export class SingleStepGroupManager {
         }
       };
 
+      console.log('🔍 DEBUG: Uploading file to group:', {
+        groupId,
+        fileName,
+        fileSize: pdfBlob.size,
+        metadata: metadata.keyvalues
+      });
+
       const ipfsHash = await this.uploadFileToGroup(groupId, pdfBlob, fileName, metadata);
       
-      console.log(`✅ SINGLE-STEP: Uploaded purchase certificate for batch ${purchaseData.batchId}, Group ID: ${groupId}, IPFS: ${ipfsHash}`);
+      if (!ipfsHash) {
+        console.error('❌ CRITICAL: uploadFileToGroup returned null or empty IPFS hash!');
+        throw new Error('Failed to upload purchase certificate - no IPFS hash returned');
+      }
+      
+      console.log(`✅ SINGLE-STEP SUCCESS: Uploaded purchase certificate for batch ${purchaseData.batchId}`);
+      console.log(`✅ Group ID: ${groupId}`);
+      console.log(`✅ IPFS Hash: ${ipfsHash}`);
+      console.log(`✅ File Name: ${fileName}`);
+      
       return { pdfBlob, ipfsHash };
-    } catch (error) {
-      console.error('Error uploading purchase certificate:', error);
+    } catch (error: any) {
+      console.error('❌ CRITICAL ERROR uploading purchase certificate:', error);
+      console.error('❌ Error details:', {
+        message: error?.message,
+        stack: error?.stack,
+        groupId,
+        purchaseData
+      });
       // Don't throw error - return null so purchase can continue
       console.warn('⚠️ Purchase certificate upload failed, but purchase will continue');
       return null;
@@ -562,7 +634,7 @@ export class SingleStepGroupManager {
     
     pdf.setFontSize(10);
     pdf.setFont('helvetica', 'normal');
-    pdf.text('Government of Odisha - Department of Agriculture & Farmers Empowerment', pageWidth / 2, yPosition, { align: 'center' });
+    pdf.text(' - Department of Agriculture & Farmers Empowerment', pageWidth / 2, yPosition, { align: 'center' });
     yPosition += 20;
     
     // Certificate number and date
@@ -982,6 +1054,59 @@ export class SingleStepGroupManager {
    */
   public getGroupVerificationUrl(groupId: string): string {
     return `https://gateway.pinata.cloud/ipfs/${groupId}`;
+  }
+
+  /**
+   * Verify file was added to group by checking group contents
+   */
+  private async verifyFileInGroup(groupId: string, ipfsHash: string): Promise<void> {
+    try {
+      console.log(`🔍 Verifying file ${ipfsHash} is in group ${groupId}...`);
+      
+      // Try public endpoint first
+      let response = await fetch(`https://api.pinata.cloud/v3/groups/public/${groupId}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${PINATA_CONFIG.jwt}`,
+        },
+      });
+
+      if (!response.ok && response.status === 404) {
+        // Try private endpoint
+        response = await fetch(`https://api.pinata.cloud/v3/groups/${groupId}`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${PINATA_CONFIG.jwt}`,
+          },
+        });
+      }
+
+      if (response.ok) {
+        const groupData = await response.json();
+        const files = groupData.data?.files || groupData.files || [];
+        
+        const fileFound = files.some((file: any) => 
+          file.cid === ipfsHash || 
+          file.ipfsHash === ipfsHash || 
+          file.IpfsHash === ipfsHash ||
+          file.hash === ipfsHash
+        );
+        
+        if (fileFound) {
+          console.log(`✅ VERIFIED: File ${ipfsHash} confirmed in group ${groupId}`);
+          console.log(`✅ Group contains ${files.length} file(s)`);
+        } else {
+          console.warn(`⚠️ File ${ipfsHash} not found in group ${groupId} file list`);
+          console.warn(`⚠️ Group has ${files.length} file(s), but our file is not listed`);
+          console.warn(`⚠️ This might be a timing issue - file might appear shortly`);
+        }
+      } else {
+        console.warn(`⚠️ Could not verify group ${groupId}: ${response.status}`);
+      }
+    } catch (error) {
+      console.warn('⚠️ Error verifying file in group (non-critical):', error);
+      // Don't throw - this is just verification
+    }
   }
 
   /**

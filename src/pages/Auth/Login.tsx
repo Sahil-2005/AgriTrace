@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
@@ -51,7 +51,45 @@ export const Login = () => {
           title: "Login successful",
           description: "Welcome back to AgriTrace!",
         });
-        navigate('/dashboard');
+        
+        // Get user profile to determine redirect
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            // Wait a moment for profile to be available
+            setTimeout(async () => {
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('id, user_type')
+                .eq('user_id', user.id)
+                .single();
+              
+              if (profile?.user_type === 'driver') {
+                // Check if driver has completed registration
+                const { data: driverProfile } = await supabase
+                  .from('driver_profiles')
+                  .select('vehicle_type')
+                  .eq('profile_id', profile.id)
+                  .single();
+                
+                if (driverProfile?.vehicle_type) {
+                  // Driver is fully registered, go to dashboard
+                  navigate('/driver-dashboard');
+                } else {
+                  // Driver needs to complete registration
+                  navigate('/become-driver');
+                }
+              } else {
+                navigate('/dashboard');
+              }
+            }, 500);
+          } else {
+            navigate('/dashboard');
+          }
+        } catch (err) {
+          // Fallback to dashboard if profile check fails
+          navigate('/dashboard');
+        }
       }
     } catch (error) {
       toast({
@@ -192,7 +230,7 @@ export const Login = () => {
 
         <div className="text-center mt-6">
           <p className="text-sm text-white/80">
-            Protected by Government of Odisha security protocols
+            Protected by  security protocols
           </p>
         </div>
       </div>
