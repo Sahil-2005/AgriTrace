@@ -1,0 +1,192 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OmniDim Batch Registration Submission",
+  "description": "Schema for batch registration data collected via OmniDim voice calls",
+  "type": "object",
+  "required": [
+    "callId",
+    "farmerPhone",
+    "farmerName",
+    "language",
+    "collectedData"
+  ],
+  "properties": {
+    "callId": {
+      "type": "string",
+      "description": "Unique identifier for the call",
+      "pattern": "^CALL-[0-9]{13}-[a-z0-9]{9}$",
+      "example": "CALL-1735123456789-abc123xyz"
+    },
+    "farmerPhone": {
+      "type": "string",
+      "description": "Farmer's phone number in E.164 format",
+      "pattern": "^\\+91[0-9]{10}$",
+      "example": "+919876543210"
+    },
+    "farmerName": {
+      "type": "string",
+      "description": "Farmer's full name",
+      "minLength": 2,
+      "maxLength": 100,
+      "example": "Ram Singh"
+    },
+    "farmerLocation": {
+      "type": "string",
+      "description": "Farm location (village, district, state)",
+      "maxLength": 200,
+      "example": "Bhubaneswar, Khordha, Odisha"
+    },
+    "language": {
+      "type": "string",
+      "description": "Language code used during call",
+      "enum": ["hi", "or", "te", "en"],
+      "example": "hi"
+    },
+    "confidenceScore": {
+      "type": "number",
+      "description": "Overall confidence score for collected data (0.0 - 1.0)",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "example": 0.85
+    },
+    "callRecordingUrl": {
+      "type": "string",
+      "description": "URL to call recording (if available)",
+      "format": "uri",
+      "example": "https://omnidim.com/recordings/call-123.mp3"
+    },
+    "callDuration": {
+      "type": "integer",
+      "description": "Call duration in seconds",
+      "minimum": 0,
+      "example": 420
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO 8601 timestamp of call completion",
+      "format": "date-time",
+      "example": "2025-12-25T10:30:00Z"
+    },
+    "collectedData": {
+      "type": "object",
+      "description": "Batch registration data collected from farmer",
+      "required": [
+        "cropType",
+        "variety",
+        "harvestQuantity",
+        "sowingDate",
+        "harvestDate",
+        "pricePerKg"
+      ],
+      "properties": {
+        "cropType": {
+          "type": "string",
+          "description": "Type of crop",
+          "enum": [
+            "Rice",
+            "Wheat",
+            "Maize",
+            "Turmeric",
+            "Black Gram",
+            "Green Chili",
+            "Coconut"
+          ],
+          "example": "Rice"
+        },
+        "variety": {
+          "type": "string",
+          "description": "Crop variety name",
+          "minLength": 1,
+          "maxLength": 100,
+          "example": "Basmati"
+        },
+        "harvestQuantity": {
+          "type": "number",
+          "description": "Harvest quantity in kilograms",
+          "minimum": 1,
+          "maximum": 100000,
+          "example": 500
+        },
+        "sowingDate": {
+          "type": "string",
+          "description": "Sowing date in YYYY-MM-DD format",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "example": "2025-08-15"
+        },
+        "harvestDate": {
+          "type": "string",
+          "description": "Harvest date in YYYY-MM-DD format",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "example": "2025-12-20"
+        },
+        "pricePerKg": {
+          "type": "number",
+          "description": "Price per kilogram in Indian Rupees",
+          "minimum": 0.01,
+          "maximum": 10000,
+          "example": 25.50
+        },
+        "certification": {
+          "type": "string",
+          "description": "Certification type",
+          "enum": [
+            "Organic",
+            "Fair Trade",
+            "Standard",
+            "Premium"
+          ],
+          "default": "Standard",
+          "example": "Standard"
+        },
+        "grading": {
+          "type": "string",
+          "description": "Quality grading",
+          "enum": [
+            "Premium",
+            "Standard",
+            "Basic"
+          ],
+          "default": "Standard",
+          "example": "Premium"
+        },
+        "labTest": {
+          "type": "string",
+          "description": "Lab test results or notes",
+          "maxLength": 500,
+          "example": "Pesticide-free certificate available"
+        },
+        "freshnessDuration": {
+          "type": "integer",
+          "description": "Freshness duration in days",
+          "minimum": 1,
+          "maximum": 365,
+          "default": 7,
+          "example": 7
+        }
+      }
+    },
+    "validationErrors": {
+      "type": "array",
+      "description": "List of validation errors found in collected data",
+      "items": {
+        "type": "string"
+      },
+      "example": []
+    },
+    "uncertainFields": {
+      "type": "array",
+      "description": "Fields where farmer seemed uncertain",
+      "items": {
+        "type": "string"
+      },
+      "example": ["pricePerKg"]
+    },
+    "notes": {
+      "type": "string",
+      "description": "Additional notes about the call",
+      "maxLength": 1000,
+      "example": "Farmer was cooperative, all information collected successfully"
+    }
+  }
+}
+

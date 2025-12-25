@@ -1,0 +1,179 @@
+{
+  "success": true,
+  "count": 1,
+  "data": [
+    {
+      "_id": "694cd08a1f85bd8ffff17d99",
+      "phoneNumber": "+919876543210",
+      "status": "Ended",
+      "duration": 180,
+      "transcript": [
+        {
+          "sender": "BOT",
+          "message": "Hello, I'm calling to help you register your crop batch.",
+          "timestamp": "2025-12-25 10:00:00 UTC"
+        },
+        {
+          "sender": "FARMER",
+          "message": "Hello, yes I want to register my rice crop.",
+          "timestamp": "2025-12-25 10:00:15 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "Great! Can you tell me the variety of rice?",
+          "timestamp": "2025-12-25 10:00:30 UTC"
+        },
+        {
+          "sender": "FARMER",
+          "message": "It's Basmati rice.",
+          "timestamp": "2025-12-25 10:00:45 UTC"
+        }
+      ],
+      "callSummary": "Farmer registered Basmati rice crop. Harvested 500 kg. Sowing date: 2025-06-01, Harvest date: 2025-12-15. Price: ₹80 per kg. Location: Odisha.",
+      "rawPayload": {
+        "transcript": [
+          {
+            "sender": "BOT",
+            "message": "Hello, I'm calling to help you register your crop batch.",
+            "timestamp": "2025-12-25 10:00:00 UTC"
+        },
+        {
+          "sender": "FARMER",
+          "message": "Hello, yes I want to register my rice crop.",
+          "timestamp": "2025-12-25 10:00:15 UTC"
+        }
+        ],
+        "customerSpecificData": {
+          "PhoneNumber": "+919876543210",
+          "farmerName": "Rajesh Kumar",
+          "fullName": "Rajesh Kumar",
+          "name": "Rajesh Kumar",
+          "location": "Bhubaneswar, Odisha",
+          "farmLocation": "Bhubaneswar, Odisha",
+          "language": "hi",
+          "cropType": "Rice",
+          "variety": "Basmati",
+          "harvestQuantity": 500,
+          "sowingDate": "2025-06-01",
+          "harvestDate": "2025-12-15",
+          "pricePerKg": 80,
+          "certification": "Organic",
+          "grading": "Grade A",
+          "labTest": "Passed - No pesticides detected",
+          "freshnessDuration": 7
+        },
+        "callStatus": "Ended",
+        "duration": "180",
+        "confidenceScore": 0.95
+      },
+      "receivedAt": "2025-12-25T10:05:00.000Z",
+      "createdAt": "2025-12-25T10:05:00.000Z",
+      "updatedAt": "2025-12-25T10:05:00.000Z",
+      "__v": 0
+    },
+    {
+      "_id": "694cd08a1f85bd8ffff17d98",
+      "phoneNumber": "+919123456789",
+      "status": "Ended",
+      "duration": 200,
+      "transcript": [
+        {
+          "sender": "BOT",
+          "message": "Hello, I'm calling to help you register your crop batch.",
+          "timestamp": "2025-12-25 11:00:00 UTC"
+        },
+        {
+          "sender": "FARMER",
+          "message": "Namaste, I have turmeric crop to register.",
+          "timestamp": "2025-12-25 11:00:20 UTC"
+        }
+      ],
+      "callSummary": "Farmer registered Turmeric crop. Harvested 300 kg. Sowing date: 2025-05-15, Harvest date: 2025-12-10. Price: ₹120 per kg. Location: Cuttack, Odisha.",
+      "rawPayload": {
+        "transcript": [
+          {
+            "sender": "BOT",
+            "message": "Hello, I'm calling to help you register your crop batch.",
+            "timestamp": "2025-12-25 11:00:00 UTC"
+          }
+        ],
+        "customerSpecificData": {
+          "PhoneNumber": "+919123456789",
+          "farmerName": "Priya Devi",
+          "fullName": "Priya Devi",
+          "name": "Priya Devi",
+          "location": "Cuttack, Odisha",
+          "farmLocation": "Cuttack, Odisha",
+          "language": "hi",
+          "cropType": "Turmeric",
+          "variety": "Lakadong",
+          "harvestQuantity": 300,
+          "sowingDate": "2025-05-15",
+          "harvestDate": "2025-12-10",
+          "pricePerKg": 120,
+          "certification": "Organic",
+          "grading": "Premium",
+          "labTest": "Passed - High curcumin content",
+          "freshnessDuration": 10
+        },
+        "callStatus": "Ended",
+        "duration": "200",
+        "confidenceScore": 0.92
+      },
+      "receivedAt": "2025-12-25T11:05:00.000Z",
+      "createdAt": "2025-12-25T11:05:00.000Z",
+      "updatedAt": "2025-12-25T11:05:00.000Z",
+      "__v": 0
+    },
+    {
+      "_id": "694cd08a1f85bd8ffff17d97",
+      "phoneNumber": "+919765432109",
+      "status": "Ended",
+      "duration": 150,
+      "transcript": [
+        {
+          "sender": "BOT",
+          "message": "Hello, I'm calling to help you register your crop batch.",
+          "timestamp": "2025-12-25 12:00:00 UTC"
+        }
+      ],
+      "callSummary": "Farmer registered Wheat crop. Harvested 1000 kg. Sowing date: 2025-11-01, Harvest date: 2025-12-20. Price: ₹25 per kg. Location: Sambalpur, Odisha.",
+      "rawPayload": {
+        "transcript": [
+          {
+            "sender": "BOT",
+            "message": "Hello, I'm calling to help you register your crop batch.",
+            "timestamp": "2025-12-25 12:00:00 UTC"
+          }
+        ],
+        "customerSpecificData": {
+          "PhoneNumber": "+919765432109",
+          "farmerName": "Amit Singh",
+          "fullName": "Amit Singh",
+          "name": "Amit Singh",
+          "location": "Sambalpur, Odisha",
+          "farmLocation": "Sambalpur, Odisha",
+          "language": "hi",
+          "cropType": "Wheat",
+          "variety": "HD-3086",
+          "harvestQuantity": 1000,
+          "sowingDate": "2025-11-01",
+          "harvestDate": "2025-12-20",
+          "pricePerKg": 25,
+          "certification": "Standard",
+          "grading": "Grade A",
+          "labTest": "Passed - Quality tested",
+          "freshnessDuration": 15
+        },
+        "callStatus": "Ended",
+        "duration": "150",
+        "confidenceScore": 0.88
+      },
+      "receivedAt": "2025-12-25T12:05:00.000Z",
+      "createdAt": "2025-12-25T12:05:00.000Z",
+      "updatedAt": "2025-12-25T12:05:00.000Z",
+      "__v": 0
+    }
+  ]
+}
+

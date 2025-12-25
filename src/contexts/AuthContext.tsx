@@ -70,18 +70,73 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchProfile = async (userId: string) => {
     try {
       console.log('🔍 Fetching profile for user:', userId);
-      const { data: profileData, error } = await supabase
+      
+      // First, try to get the user's auth data to extract metadata
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Try to fetch existing profile - use limit(1) to avoid single() error
+      const { data: profileList, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('user_id', userId)
-        .single();
+        .limit(1);
       
       if (error) {
-        console.warn('Profile not found:', error.message);
+        console.warn('Error fetching profile:', error.message);
         setProfile(null);
+        return;
+      }
+      
+      // If profile exists, use it
+      if (profileList && profileList.length > 0) {
+        console.log('✅ Profile loaded:', profileList[0]);
+        setProfile(profileList[0]);
+        return;
+      }
+      
+      // Profile doesn't exist - create it from user metadata
+      console.log('⚠️ Profile not found, creating from user metadata...');
+      
+      if (user) {
+        // Normalize user_type (fix typos and ensure valid values)
+        const rawUserType = (user.user_metadata?.user_type || '').toLowerCase();
+        const normalizedUserType = 
+          rawUserType === 'distirbutor' || rawUserType === 'distributer' ? 'distributor' :
+          ['farmer', 'distributor', 'retailer', 'helper', 'admin'].includes(rawUserType) ? rawUserType :
+          'farmer'; // Default to farmer
+        
+        // Normalize role (use role from metadata if valid, otherwise use user_type)
+        const rawRole = (user.user_metadata?.role || '').toLowerCase();
+        const normalizedRole = 
+          rawRole === 'distirbutor' || rawRole === 'distributer' ? 'distributor' :
+          ['farmer', 'distributor', 'retailer', 'helper', 'admin'].includes(rawRole) ? rawRole :
+          normalizedUserType; // Fallback to normalized user_type
+        
+        const newProfile = {
+          user_id: userId,
+          full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+          email: user.email || '',
+          user_type: normalizedUserType,
+          farm_location: user.user_metadata?.farm_location || null,
+          role: normalizedRole, // Ensure role is set and matches user_type
+        };
+        
+        const { data: createdProfile, error: createError } = await supabase
+          .from('profiles')
+          .insert(newProfile)
+          .select()
+          .single();
+        
+        if (createError) {
+          console.error('❌ Failed to create profile:', createError);
+          setProfile(null);
+        } else {
+          console.log('✅ Profile created:', createdProfile);
+          setProfile(createdProfile);
+        }
       } else {
-        console.log('✅ Profile loaded:', profileData);
-        setProfile(profileData);
+        console.warn('User data not available to create profile');
+        setProfile(null);
       }
     } catch (error) {
       console.error('Error fetching profile:', error);

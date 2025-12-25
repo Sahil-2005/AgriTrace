@@ -4,11 +4,10 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Package, ShoppingCart, MapPin, Calendar, Award, Eye, Plus, User, History, FileText, Download } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { UltraSimplePurchaseModal } from '@/components/UltraSimplePurchaseModal';
-import { transactionManager } from '@/utils/transactionManager';
+import { BatchDetailsModal } from '@/components/BatchDetailsModal';
 
 interface DistributorBatch {
   id: string;
@@ -33,9 +32,7 @@ export const RetailerMarketplace = () => {
   const [loading, setLoading] = useState(true);
   const [selectedBatch, setSelectedBatch] = useState<DistributorBatch | null>(null);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   
   // Get user type from user metadata
   const userTypeFromMetadata = user?.user_metadata?.user_type;
@@ -73,6 +70,7 @@ export const RetailerMarketplace = () => {
         `)
         .eq('current_seller_type', 'distributor')
         .eq('status', 'available')
+        .gt('quantity', 0) // Ensure quantity > 0
         .order('created_at', { ascending: false })
         .limit(20);
 
@@ -152,37 +150,27 @@ export const RetailerMarketplace = () => {
     fetchDistributorBatches();
   };
 
-  const handleViewDetails = async (batch: DistributorBatch) => {
-    setSelectedBatch(batch);
-    setShowDetailsModal(true);
-    setLoadingHistory(true);
-    
-    try {
-      console.log('🔍 DEBUG: Full batch object:', batch);
-      console.log('🔍 DEBUG: Batch keys:', Object.keys(batch));
-      console.log('🔍 DEBUG: Batch batch_id:', batch.batch_id);
-      console.log('🔍 DEBUG: Batch id:', batch.id);
-      console.log('🔍 DEBUG: Batch batches:', batch.batches);
-      
-      // Try different possible batch ID fields
-      const batchId = batch.batch_id || batch.id || batch.batches?.id;
-      console.log('🔍 DEBUG: Using batch ID:', batchId);
-      
-      if (!batchId) {
-        console.error('❌ No valid batch ID found');
-        setTransactionHistory([]);
-        return;
+  const handleViewDetails = (batch: DistributorBatch) => {
+    // Structure data the same way Marketplace does - with nested batches structure
+    // This ensures consistent UI rendering across all pages
+    const batchData = {
+      id: batch.id,
+      batch_id: batch.id,
+      current_seller_id: batch.current_owner,
+      current_seller_type: 'distributor',
+      price: batch.price_per_kg * batch.harvest_quantity,
+      quantity: batch.harvest_quantity,
+      status: batch.status,
+      created_at: batch.created_at || new Date().toISOString(),
+      profiles: batch.profiles,
+      batches: {
+        ...batch,
+        profiles: batch.profiles
       }
-      
-      const transactions = await transactionManager.getBatchTransactions(batchId);
-      console.log('🔍 DEBUG: Transaction history:', transactions);
-      setTransactionHistory(transactions);
-    } catch (error) {
-      console.error('Error fetching transaction history:', error);
-      setTransactionHistory([]);
-    } finally {
-      setLoadingHistory(false);
-    }
+    };
+    
+    setSelectedBatch(batchData as any);
+    setIsDetailsModalOpen(true);
   };
 
   return (
@@ -331,215 +319,16 @@ export const RetailerMarketplace = () => {
         </div>
       )}
 
-      {/* View Details Modal */}
-      <Dialog open={showDetailsModal} onOpenChange={() => setShowDetailsModal(false)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <DialogTitle className="text-2xl font-bold">
-                  {selectedBatch?.crop_type} - {selectedBatch?.variety}
-                </DialogTitle>
-                <DialogDescription>
-                  Complete batch information and traceability details
-                </DialogDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge className={getCertificationColor(selectedBatch?.certification_level || 'Standard')}>
-                  {selectedBatch?.certification_level || 'Standard'}
-                </Badge>
-                <Badge variant="secondary" className="bg-green-100 text-green-800">
-                  {selectedBatch?.status || 'available'}
-                </Badge>
-              </div>
-            </div>
-          </DialogHeader>
-          
-          {selectedBatch && (
-            <div className="space-y-6">
-              {/* Product Details */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Package className="h-5 w-5" />
-                    Product Details
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium text-muted-foreground">Crop Type:</span>
-                      <p className="font-semibold">{selectedBatch.crop_type}</p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-muted-foreground">Variety:</span>
-                      <p className="font-semibold">{selectedBatch.variety}</p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-muted-foreground">Harvest Quantity:</span>
-                      <p className="font-semibold">{selectedBatch.harvest_quantity} kg</p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-muted-foreground">Grading:</span>
-                      <p className="font-semibold">{selectedBatch.certification_level}</p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-muted-foreground">Freshness Duration:</span>
-                      <p className="font-semibold">7 days</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Timeline */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Calendar className="h-5 w-5" />
-                    Timeline
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium text-muted-foreground">Sowing Date:</span>
-                      <p className="font-semibold">{new Date(selectedBatch.harvest_date).toLocaleDateString()}</p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-muted-foreground">Harvest Date:</span>
-                      <p className="font-semibold">{new Date(selectedBatch.harvest_date).toLocaleDateString()}</p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-muted-foreground">Registered:</span>
-                      <p className="font-semibold">{new Date(selectedBatch.harvest_date).toLocaleDateString()}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Pricing */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Award className="h-5 w-5" />
-                    Pricing
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium text-muted-foreground">Price per kg:</span>
-                      <p className="font-semibold text-lg">₹{selectedBatch.price_per_kg}</p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-muted-foreground">Total Value:</span>
-                      <p className="font-semibold text-lg">₹{(selectedBatch.price_per_kg * selectedBatch.harvest_quantity).toLocaleString()}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Distributor Information */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <User className="h-5 w-5" />
-                    Distributor Information
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="font-medium text-muted-foreground">Distributor Name:</span>
-                      <p className="font-semibold">{selectedBatch.profiles?.full_name || 'Distributor'}</p>
-                    </div>
-                    <div>
-                      <span className="font-medium text-muted-foreground">Location:</span>
-                      <p className="font-semibold">{selectedBatch.profiles?.farm_location || 'Unknown Location'}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Transaction History */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <History className="h-5 w-5" />
-                    Transaction History
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {loadingHistory ? (
-                    <div className="flex items-center justify-center py-4">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                      <span className="ml-2 text-sm text-muted-foreground">Loading transaction history...</span>
-                    </div>
-                  ) : transactionHistory.length > 0 ? (
-                    <div className="space-y-3">
-                      {transactionHistory.map((transaction, index) => (
-                        <div key={index} className="border rounded-lg p-3 bg-gray-50">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4 text-muted-foreground" />
-                              <span className="font-medium text-sm">
-                                {transaction.type === 'HARVEST' ? 'Harvest' : 
-                                 transaction.type === 'PURCHASE' ? 'Purchase' : 
-                                 transaction.type === 'TRANSFER' ? 'Transfer' : transaction.type}
-                              </span>
-                            </div>
-                            <Badge variant="outline" className="text-xs">
-                              {new Date(transaction.timestamp).toLocaleDateString()}
-                            </Badge>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                            <div>
-                              <span className="font-medium">From:</span> {transaction.fromName || transaction.from}
-                            </div>
-                            <div>
-                              <span className="font-medium">To:</span> {transaction.toName || transaction.to}
-                            </div>
-                            <div>
-                              <span className="font-medium">Quantity:</span> {transaction.quantity} kg
-                            </div>
-                            <div>
-                              <span className="font-medium">Price:</span> ₹{transaction.price || 'N/A'}
-                            </div>
-                          </div>
-                          {transaction.ipfsHash && (
-                            <div className="mt-2 flex items-center justify-between">
-                              <div className="text-xs text-muted-foreground">
-                                <span className="font-medium">Certificate:</span> {transaction.ipfsHash.substring(0, 20)}...
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-6 px-2 text-xs"
-                                onClick={() => {
-                                  const ipfsUrl = `https://gateway.pinata.cloud/ipfs/${transaction.ipfsHash}`;
-                                  window.open(ipfsUrl, '_blank');
-                                }}
-                              >
-                                <Download className="h-3 w-3 mr-1" />
-                                Download
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-4 text-muted-foreground">
-                      <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No transaction history found</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Batch Details Modal - Using same component as everywhere else */}
+      <BatchDetailsModal
+        batch={selectedBatch}
+        isOpen={isDetailsModalOpen}
+        onClose={() => {
+          setIsDetailsModalOpen(false);
+          setSelectedBatch(null);
+        }}
+        onBuyNow={handlePurchase}
+      />
 
       {/* Purchase Modal */}
       {selectedBatch && (

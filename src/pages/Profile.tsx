@@ -15,7 +15,13 @@ import {
   Wallet,
   Package,
   DollarSign,
-  TrendingUp
+  TrendingUp,
+  Camera,
+  Upload,
+  Loader2,
+  AlertCircle,
+  CheckCircle,
+  X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,6 +33,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { analyzeCropHealth, type CropHealthAnalysis } from '@/services/cropHealthService';
 
 export const Profile = () => {
   const { user } = useAuth();
@@ -41,6 +49,13 @@ export const Profile = () => {
     bio: ''
   });
   const { toast } = useToast();
+  
+  // Crop Health Detection State
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<CropHealthAnalysis | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -127,6 +142,58 @@ export const Profile = () => {
         title: "Update failed",
         description: "Failed to update profile. Please try again.",
       });
+    }
+  };
+
+  const handleAnalyzeCrop = async () => {
+    if (!selectedImage) return;
+
+    setAnalyzing(true);
+    setAnalysisError(null);
+    setAnalysisResult(null);
+
+    try {
+      const response = await analyzeCropHealth(selectedImage);
+      
+      if (response.success && response.analysis) {
+        setAnalysisResult(response.analysis);
+        toast({
+          title: "Analysis Complete",
+          description: `Detected: ${response.analysis.diseaseName || 'Crop health analyzed'}`,
+        });
+      } else {
+        setAnalysisError(response.error || 'Failed to analyze crop image');
+        toast({
+          variant: "destructive",
+          title: "Analysis Failed",
+          description: response.error || 'Please try again',
+        });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      setAnalysisError(errorMessage);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: errorMessage,
+      });
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const getSeverityAlertClass = (severity: string) => {
+    switch (severity) {
+      case 'critical':
+        return 'border-red-500 bg-red-50';
+      case 'high':
+        return 'border-orange-500 bg-orange-50';
+      case 'medium':
+        return 'border-yellow-500 bg-yellow-50';
+      case 'low':
+        return 'border-green-500 bg-green-50';
+      default:
+        return '';
     }
   };
 
@@ -221,9 +288,10 @@ export const Profile = () => {
 
         {/* Profile Details */}
         <Tabs defaultValue="personal" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="personal">Personal</TabsTrigger>
             <TabsTrigger value="farm">Farm Info</TabsTrigger>
+            <TabsTrigger value="cropHealth">Crop Health</TabsTrigger>
             <TabsTrigger value="wallet">Wallet</TabsTrigger>
             <TabsTrigger value="stats">Statistics</TabsTrigger>
           </TabsList>
@@ -326,6 +394,198 @@ export const Profile = () => {
                     />
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="cropHealth">
+            <Card className="govt-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Camera className="h-5 w-5" />
+                  Crop Health Detection
+                </CardTitle>
+                <CardDescription>
+                  Upload a photo of your crop to detect diseases and get AI-powered remedies
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Image Upload Section */}
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors">
+                    {!imagePreview ? (
+                      <div className="space-y-4">
+                        <Camera className="h-12 w-12 mx-auto text-gray-400" />
+                        <div>
+                          <Label htmlFor="crop-image" className="cursor-pointer">
+                            <span className="text-primary hover:underline">Click to upload</span>
+                            <span className="text-gray-600"> or drag and drop</span>
+                          </Label>
+                          <p className="text-sm text-gray-500 mt-2">
+                            PNG, JPG up to 10MB
+                          </p>
+                        </div>
+                        <Input
+                          id="crop-image"
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setSelectedImage(file);
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                setImagePreview(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                              setAnalysisResult(null);
+                              setAnalysisError(null);
+                            }
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="relative inline-block">
+                          <img
+                            src={imagePreview}
+                            alt="Crop preview"
+                            className="max-h-64 rounded-lg mx-auto"
+                          />
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            className="absolute top-2 right-2"
+                            onClick={() => {
+                              setSelectedImage(null);
+                              setImagePreview(null);
+                              setAnalysisResult(null);
+                              setAnalysisError(null);
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <div className="flex gap-2 justify-center">
+                          <Button
+                            onClick={handleAnalyzeCrop}
+                            disabled={analyzing || !selectedImage}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            {analyzing ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Analyzing...
+                              </>
+                            ) : (
+                              <>
+                                <Upload className="h-4 w-4 mr-2" />
+                                Analyze Crop Health
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Analysis Results */}
+                {analysisError && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Analysis Failed</AlertTitle>
+                    <AlertDescription>{analysisError}</AlertDescription>
+                  </Alert>
+                )}
+
+                {analysisResult && (
+                  <div className="space-y-4">
+                    <Alert className={getSeverityAlertClass(analysisResult.severity)}>
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertTitle className="text-lg font-semibold">
+                        {analysisResult.diseaseName || 'Analysis Complete'}
+                      </AlertTitle>
+                      <AlertDescription className="mt-2">
+                        <p className="mb-2">{analysisResult.description}</p>
+                        <div className="flex items-center gap-4 mt-2">
+                          <span className="text-sm">
+                            <strong>Confidence:</strong> {Math.round(analysisResult.confidence * 100)}%
+                          </span>
+                          <span className="text-sm">
+                            <strong>Severity:</strong> {analysisResult.severity.toUpperCase()}
+                          </span>
+                          {analysisResult.affectedArea && (
+                            <span className="text-sm">
+                              <strong>Affected:</strong> {analysisResult.affectedArea}
+                            </span>
+                          )}
+                        </div>
+                      </AlertDescription>
+                    </Alert>
+
+                    {analysisResult.remedies.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                            Recommended Remedies
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <ol className="list-decimal list-inside space-y-2">
+                            {analysisResult.remedies.map((remedy, index) => (
+                              <li key={index} className="text-sm text-gray-700">
+                                {remedy}
+                              </li>
+                            ))}
+                          </ol>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {analysisResult.prevention.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <Shield className="h-5 w-5 text-blue-600" />
+                            Prevention Tips
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <ul className="list-disc list-inside space-y-2">
+                            {analysisResult.prevention.map((tip, index) => (
+                              <li key={index} className="text-sm text-gray-700">
+                                {tip}
+                              </li>
+                            ))}
+                          </ul>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {analysisResult.recommendations && analysisResult.recommendations.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <Star className="h-5 w-5 text-yellow-600" />
+                            Additional Recommendations
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <ul className="list-disc list-inside space-y-2">
+                            {analysisResult.recommendations.map((rec, index) => (
+                              <li key={index} className="text-sm text-gray-700">
+                                {rec}
+                              </li>
+                            ))}
+                          </ul>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

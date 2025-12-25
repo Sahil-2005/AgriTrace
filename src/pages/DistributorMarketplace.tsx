@@ -39,21 +39,62 @@ export const DistributorMarketplace = () => {
   const fetchBatches = async () => {
     try {
       setLoading(true);
-      // Get batches that are owned by distributors (not farmers)
-      const { data, error } = await supabase
-        .from('batches')
+      // Fetch from marketplace table to get proper structure (same as Marketplace page)
+      const { data: marketplaceData, error: marketplaceError } = await supabase
+        .from('marketplace')
         .select(`
           *,
-          profiles!batches_current_owner_fkey(*)
+          batches!inner(*),
+          profiles!marketplace_current_seller_id_fkey(*)
         `)
+        .eq('current_seller_type', 'distributor')
         .eq('status', 'available')
-        .neq('farmer_id', 'current_owner') // Exclude farmer-owned batches
+        .gt('quantity', 0)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setBatches(data || []);
+      if (marketplaceError) {
+        console.error('Error fetching marketplace data:', marketplaceError);
+        // Fallback to direct batch fetch
+        const { data: batchData, error: batchError } = await supabase
+          .from('batches')
+          .select(`
+            *,
+            profiles!batches_current_owner_fkey(*)
+          `)
+          .eq('status', 'available')
+          .order('created_at', { ascending: false });
+
+        if (batchError) throw batchError;
+        
+        // Structure to match marketplace format
+        const structuredBatches = (batchData || []).map(batch => ({
+          id: `marketplace-${batch.id}`,
+          batch_id: batch.id,
+          current_seller_id: batch.current_owner,
+          current_seller_type: 'distributor',
+          price: batch.price_per_kg * batch.harvest_quantity,
+          quantity: batch.harvest_quantity,
+          status: batch.status,
+          created_at: batch.created_at,
+          profiles: batch.profiles,
+          batches: batch
+        }));
+        
+        setBatches(structuredBatches);
+        return;
+      }
+
+      // Structure data the same way Marketplace does
+      const structuredData = (marketplaceData || []).map(item => ({
+        ...item,
+        profiles: item.profiles,
+        batches: item.batches
+      }));
+
+      setBatches(structuredData);
     } catch (error) {
       console.error('Error fetching distributor batches:', error);
+      setBatches([]);
     } finally {
       setLoading(false);
     }
@@ -65,12 +106,13 @@ export const DistributorMarketplace = () => {
       return;
     }
 
-    const filtered = batches.filter(batch =>
-      batch.crop_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      batch.variety?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      batch.profiles?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      batch.profiles?.farm_location?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filtered = batches.filter(item => {
+      const batch = item.batches || item;
+      return batch.crop_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        batch.variety?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.profiles?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.profiles?.farm_location?.toLowerCase().includes(searchTerm.toLowerCase());
+    });
     setFilteredBatches(filtered);
   };
 
@@ -153,7 +195,7 @@ export const DistributorMarketplace = () => {
               <div>
                 <p className="text-sm text-gray-600">Active Distributors</p>
                 <p className="text-2xl font-bold">
-                  {new Set(filteredBatches.map(b => b.current_owner)).size}
+                  {new Set(filteredBatches.map(item => item.current_seller_id || (item.batches || item).current_owner)).size}
                 </p>
               </div>
             </div>
@@ -170,7 +212,10 @@ export const DistributorMarketplace = () => {
                 <p className="text-sm text-gray-600">Avg Quality Score</p>
                 <p className="text-2xl font-bold">
                   {filteredBatches.length > 0 
-                    ? Math.round(filteredBatches.reduce((sum, b) => sum + (b.quality_score || 0), 0) / filteredBatches.length)
+                    ? Math.round(filteredBatches.reduce((sum, item) => {
+                        const batch = item.batches || item;
+                        return sum + (item.quality_score || batch.quality_score || 0);
+                      }, 0) / filteredBatches.length)
                     : 0
                   }
                 </p>
@@ -182,69 +227,72 @@ export const DistributorMarketplace = () => {
 
       {/* Batches Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredBatches.map((batch) => (
-          <Card key={batch.id} className="hover:shadow-lg transition-shadow">
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div>
-                  <CardTitle className="text-lg">{batch.crop_type}</CardTitle>
-                  <CardDescription>{batch.variety}</CardDescription>
+        {filteredBatches.map((item) => {
+          const batch = item.batches || item;
+          return (
+            <Card key={item.id || batch.id} className="hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle className="text-lg">{batch.crop_type}</CardTitle>
+                    <CardDescription>{batch.variety}</CardDescription>
+                  </div>
+                  <Badge variant="secondary">{batch.status || item.status}</Badge>
                 </div>
-                <Badge variant="secondary">{batch.status}</Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Distributor & Location */}
-              <div className="space-y-2">
-                <div className="flex items-center text-sm">
-                  <Truck className="h-4 w-4 mr-2 text-muted-foreground" />
-                  <span>{batch.profiles?.full_name || 'Unknown Distributor'}</span>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Distributor & Location */}
+                <div className="space-y-2">
+                  <div className="flex items-center text-sm">
+                    <Truck className="h-4 w-4 mr-2 text-muted-foreground" />
+                    <span>From: {item.profiles?.full_name ? `${item.profiles.user_type ? item.profiles.user_type.charAt(0).toUpperCase() + item.profiles.user_type.slice(1) : ''} - ${item.profiles.full_name}`.trim() : 'Unknown Distributor'}</span>
+                  </div>
+                  <div className="flex items-center text-sm">
+                    <MapPin className="h-4 w-4 mr-2 text-muted-foreground" />
+                    <span>{item.profiles?.farm_location || 'Location not specified'}</span>
+                  </div>
+                  <div className="flex items-center text-sm">
+                    <Calendar className="h-4 w-4 mr-2 text-muted-foreground" />
+                    <span>Harvested: {new Date(batch.harvest_date).toLocaleDateString()}</span>
+                  </div>
                 </div>
-                <div className="flex items-center text-sm">
-                  <MapPin className="h-4 w-4 mr-2 text-muted-foreground" />
-                  <span>{batch.profiles?.farm_location || 'Location not specified'}</span>
-                </div>
-                <div className="flex items-center text-sm">
-                  <Calendar className="h-4 w-4 mr-2 text-muted-foreground" />
-                  <span>Harvested: {new Date(batch.harvest_date).toLocaleDateString()}</span>
-                </div>
-              </div>
 
-              {/* Quality & Price */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Award className="h-4 w-4 text-yellow-500" />
-                  <span className="text-sm">Quality: {batch.quality_score || 'N/A'}</span>
+                {/* Quality & Price */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Award className="h-4 w-4 text-yellow-500" />
+                    <span className="text-sm">Quality: {item.quality_score || batch.quality_score || 'Standard'}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-bold text-primary">₹{batch.price_per_kg || (item.price / (item.quantity || 1))}/kg</div>
+                    <div className="text-sm text-muted-foreground">{item.quantity || batch.harvest_quantity} kg available</div>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-lg font-bold text-primary">₹{batch.price_per_kg}/kg</div>
-                  <div className="text-sm text-muted-foreground">{batch.harvest_quantity} kg available</div>
-                </div>
-              </div>
 
-              {/* Actions */}
-              <div className="flex gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="flex-1"
-                  onClick={() => setSelectedBatch(batch)}
-                >
-                  <Eye className="h-4 w-4 mr-2" />
-                  View Details
-                </Button>
-                <Button 
-                  size="sm" 
-                  className="flex-1 gradient-primary"
-                  onClick={() => handleBuyNow(batch)}
-                >
-                  <ShoppingCart className="h-4 w-4 mr-2" />
-                  Buy Now
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                {/* Actions */}
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex-1"
+                    onClick={() => setSelectedBatch(item)}
+                  >
+                    <Eye className="h-4 w-4 mr-2" />
+                    View Details
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    className="flex-1 gradient-primary"
+                    onClick={() => handleBuyNow(item)}
+                  >
+                    <ShoppingCart className="h-4 w-4 mr-2" />
+                    Buy Now
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       {filteredBatches.length === 0 && (

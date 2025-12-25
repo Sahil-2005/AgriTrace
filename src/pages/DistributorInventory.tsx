@@ -79,32 +79,54 @@ export const DistributorInventory = () => {
             .eq('id', item.marketplace_id)
             .single();
 
-          // Get batch data
+          // Get batch data with all necessary fields (same as Marketplace)
           const { data: batchData } = await supabase
             .from('batches')
-            .select('*')
+            .select('id, crop_type, variety, harvest_date, group_id, farmer_id, current_owner, price_per_kg, harvest_quantity, grading, freshness_duration, certification, status, sowing_date, created_at, blockchain_id, blockchain_batch_id, ipfs_hash, ipfs_certificate_hash, total_price')
             .eq('id', marketplaceData?.batch_id)
             .single();
 
           // Get seller profile data (the original farmer who sold to distributor)
           const { data: sellerProfile } = await supabase
             .from('profiles')
-            .select('full_name, farm_location')
+            .select('id, full_name, farm_location, user_type')
             .eq('id', batchData?.farmer_id)
             .single();
+
+          // ALWAYS get current owner profile from batch's current_owner field (source of truth)
+          let currentOwnerProfile = null;
+          if (batchData?.current_owner) {
+            try {
+              const { data: ownerProfile } = await supabase
+                .from('profiles')
+                .select('id, full_name, farm_location, user_type')
+                .eq('id', batchData.current_owner)
+                .single();
+              currentOwnerProfile = ownerProfile;
+              console.log('🔍 DEBUG: Current owner profile fetched:', {
+                current_owner_id: batchData.current_owner,
+                ownerProfile: currentOwnerProfile
+              });
+            } catch (ownerError) {
+              console.warn('Could not fetch current owner profile:', ownerError);
+            }
+          }
 
           console.log('🔍 DEBUG: Item data:', {
             item,
             marketplaceData,
             batchData,
-            sellerProfile
+            sellerProfile,
+            currentOwnerProfile,
+            batch_current_owner: batchData?.current_owner
           });
 
           return {
             ...item,
             marketplace: marketplaceData,
             batch: batchData,
-            seller: sellerProfile
+            seller: sellerProfile,
+            currentOwner: currentOwnerProfile // This is the ACTUAL current owner from batch.current_owner
           };
         })
       );
@@ -119,15 +141,85 @@ export const DistributorInventory = () => {
     }
   };
 
-  const handleViewDetails = (item: any) => {
-    // Convert inventory item to batch format for BatchDetailsModal
-    const batchData = {
-      ...item.batch,
-      profiles: item.seller,
-      marketplace: item.marketplace
-    };
-    setSelectedBatch(batchData);
-    setIsDetailsModalOpen(true);
+  const handleViewDetails = async (item: any) => {
+    try {
+      // ALWAYS fetch current owner from batch's current_owner field (source of truth)
+      let currentOwnerProfile = null;
+      if (item.batch?.current_owner) {
+        try {
+          const { data: ownerProfile } = await supabase
+            .from('profiles')
+            .select('id, full_name, farm_location, user_type')
+            .eq('id', item.batch.current_owner)
+            .single();
+          
+          currentOwnerProfile = ownerProfile;
+          console.log('🔍 DEBUG: Fetched current owner profile:', currentOwnerProfile);
+        } catch (ownerError) {
+          console.warn('Could not fetch current owner profile:', ownerError);
+        }
+      }
+      
+      // Structure data exactly the same way Marketplace does
+      // This ensures consistent UI rendering across all pages
+      const batchData = {
+        id: item.marketplace?.id,
+        batch_id: item.marketplace?.batch_id,
+        current_seller_id: item.marketplace?.current_seller_id,
+        current_seller_type: item.marketplace?.current_seller_type,
+        price: item.marketplace?.price,
+        quantity: item.marketplace?.quantity,
+        status: item.marketplace?.status,
+        created_at: item.marketplace?.created_at,
+        profiles: currentOwnerProfile || item.currentOwner || item.seller, // ALWAYS use current owner from batch
+        batches: {
+          ...item.batch,
+          // Ensure all fields are present
+          crop_type: item.batch?.crop_type,
+          variety: item.batch?.variety,
+          harvest_date: item.batch?.harvest_date,
+          group_id: item.batch?.group_id,
+          farmer_id: item.batch?.farmer_id,
+          current_owner: item.batch?.current_owner,
+          price_per_kg: item.batch?.price_per_kg || item.marketplace?.price / (item.marketplace?.quantity || 1),
+          harvest_quantity: item.batch?.harvest_quantity,
+          grading: item.batch?.grading,
+          freshness_duration: item.batch?.freshness_duration,
+          certification: item.batch?.certification,
+          status: item.batch?.status,
+          sowing_date: item.batch?.sowing_date,
+          created_at: item.batch?.created_at,
+          blockchain_id: item.batch?.blockchain_id,
+          blockchain_batch_id: item.batch?.blockchain_batch_id,
+          ipfs_hash: item.batch?.ipfs_hash,
+          ipfs_certificate_hash: item.batch?.ipfs_certificate_hash,
+          total_price: item.batch?.total_price || (item.batch?.price_per_kg * item.batch?.harvest_quantity),
+          profiles: currentOwnerProfile || item.currentOwner || item.seller, // ALWAYS use current owner from batch
+          farmerProfile: item.seller, // Original farmer for reference
+        }
+      };
+      
+      console.log('🔍 DEBUG: Batch data for modal (marketplace structure):', batchData);
+      console.log('🔍 DEBUG: Current owner ID:', item.batch?.current_owner);
+      console.log('🔍 DEBUG: Current owner profile:', currentOwnerProfile);
+      console.log('🔍 DEBUG: Original farmer:', item.batch?.farmer_id);
+      
+      setSelectedBatch(batchData);
+      setIsDetailsModalOpen(true);
+    } catch (error) {
+      console.error('Error preparing batch details:', error);
+      // Fallback to marketplace structure
+      const batchData = {
+        ...item.marketplace,
+        batches: {
+          ...item.batch,
+          profiles: item.seller,
+        },
+        profiles: item.seller,
+      };
+      setSelectedBatch(batchData);
+      setIsDetailsModalOpen(true);
+    }
   };
 
   const handleAddToMarketplace = async (inventoryItem: any) => {
@@ -144,20 +236,44 @@ export const DistributorInventory = () => {
       }
 
       console.log('🔍 DEBUG: Adding to marketplace with profile ID:', profile.id);
+      console.log('🔍 DEBUG: Inventory item:', inventoryItem);
+      console.log('🔍 DEBUG: Marketplace ID:', inventoryItem.marketplace_id);
+      console.log('🔍 DEBUG: Quantity purchased:', inventoryItem.quantity_purchased);
 
       // Update the marketplace item to show it's now sold by distributor
-      const { error } = await supabase
+      // Also set status to 'available' and ensure quantity matches purchased quantity
+      const { error: marketplaceError } = await supabase
         .from('marketplace')
         .update({
           current_seller_id: profile.id, // Use profile.id instead of user?.id
           current_seller_type: 'distributor',
+          status: 'available', // Ensure status is 'available'
+          quantity: inventoryItem.quantity_purchased || inventoryItem.marketplace?.quantity || 0, // Set quantity to purchased quantity
           updated_at: new Date().toISOString()
         })
         .eq('id', inventoryItem.marketplace_id);
 
-      if (error) {
-        console.error('❌ Marketplace update error:', error);
-        throw new Error(`Failed to add to marketplace: ${error.message}`);
+      if (marketplaceError) {
+        console.error('❌ Marketplace update error:', marketplaceError);
+        throw new Error(`Failed to add to marketplace: ${marketplaceError.message}`);
+      }
+
+      // Also update the batch's current_owner to distributor
+      if (inventoryItem.batch?.id) {
+        const { error: batchError } = await supabase
+          .from('batches')
+          .update({
+            current_owner: profile.id,
+            status: 'available'
+          })
+          .eq('id', inventoryItem.batch.id);
+
+        if (batchError) {
+          console.warn('⚠️ Failed to update batch ownership:', batchError);
+          // Don't throw error, marketplace update succeeded
+        } else {
+          console.log('✅ Batch ownership updated to distributor');
+        }
       }
 
       console.log('✅ Successfully added to marketplace');

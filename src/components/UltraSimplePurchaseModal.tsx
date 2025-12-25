@@ -118,8 +118,32 @@ export const UltraSimplePurchaseModal: React.FC<UltraSimplePurchaseModalProps> =
       console.log('🔍 DEBUG: Purchasing from marketplace...');
       
       // Get the correct batch ID for database updates (this should be the batch UUID)
-      const batchId = batch.batch_id || batch.id || batch.batches?.id;
-      console.log('🔍 DEBUG: Using batch ID for update:', batchId);
+      // Priority: batches.id (nested) > batch_id > id (but only if it's a UUID, not marketplace integer ID)
+      let batchId = batch.batches?.id || batch.batch_id;
+      
+      // If batch.id exists and looks like a UUID (contains hyphens), use it
+      // Otherwise, it might be the marketplace integer ID, so don't use it
+      if (!batchId && batch.id) {
+        if (typeof batch.id === 'string' && batch.id.includes('-')) {
+          // Looks like a UUID
+          batchId = batch.id;
+        } else if (typeof batch.id === 'string' && batch.id.length === 36) {
+          // UUID format without checking hyphens
+          batchId = batch.id;
+        }
+      }
+      
+      console.log('🔍 DEBUG: Batch ID determination:', {
+        'batch.batches?.id': batch.batches?.id,
+        'batch.batch_id': batch.batch_id,
+        'batch.id': batch.id,
+        'batch.id type': typeof batch.id,
+        'final batchId': batchId
+      });
+      
+      if (!batchId) {
+        throw new Error('No valid batch UUID found. Cannot proceed with purchase.');
+      }
       
       // Get the marketplace ID for inventory
       // Since this batch object is from the batches table, we need to find the corresponding marketplace record
@@ -147,45 +171,199 @@ export const UltraSimplePurchaseModal: React.FC<UltraSimplePurchaseModalProps> =
         console.warn('🔍 DEBUG: No marketplace ID found, skipping inventory creation');
       }
 
-      // Update the batch ownership directly
-      const { error: updateError } = await supabase
+      // Get current marketplace quantity before purchase
+      let currentMarketplaceQuantity = batch.quantity || batch.batches?.quantity || batch.batches?.harvest_quantity || 0;
+      const remainingQuantity = currentMarketplaceQuantity - quantity;
+      
+      console.log('🔍 DEBUG: Quantity calculation:', {
+        currentQuantity: currentMarketplaceQuantity,
+        purchaseQuantity: quantity,
+        remainingQuantity: remainingQuantity,
+        batch_quantity: batch.quantity,
+        batches_quantity: batch.batches?.quantity,
+        batches_harvest_quantity: batch.batches?.harvest_quantity
+      });
+
+      // Update the batch ownership directly - use the actual batch UUID
+      // batchId should be the UUID from batches table, not marketplace ID
+      console.log('🔍 DEBUG: Updating batch ownership:', {
+        batchId,
+        newOwner: profile?.id,
+        newOwnerName: profile?.full_name,
+        newOwnerType: profile?.user_type,
+        status: remainingQuantity > 0 ? 'available' : 'sold',
+        oldOwner: batch.current_owner || batch.batches?.current_owner
+      });
+      
+      // Get the current owner BEFORE update (this is the seller)
+      const sellerId = batch.batches?.current_owner || batch.current_owner || batch.farmer_id || batch.batches?.farmer_id;
+      console.log('🔍 DEBUG: Seller ID (current owner before purchase):', sellerId);
+      
+      const { data: updatedBatch, error: updateError } = await supabase
         .from('batches')
         .update({ 
           current_owner: profile?.id,
-          status: 'available'
+          status: remainingQuantity > 0 ? 'available' : 'sold'
         })
-        .eq('id', batchId);
+        .eq('id', batchId)
+        .select('id, current_owner, status, harvest_quantity')
+        .single();
 
       if (updateError) {
+        console.error('❌ Batch ownership update failed:', updateError);
         throw new Error(`Purchase failed: ${updateError.message}`);
       }
 
-      // Update marketplace to show new owner (not sold, but transferred)
+      if (updatedBatch) {
+        console.log('✅ Batch ownership updated successfully:', {
+          batchId: updatedBatch.id,
+          oldOwner: sellerId,
+          newOwner: updatedBatch.current_owner,
+          newOwnerProfileId: profile?.id,
+          status: updatedBatch.status,
+          match: updatedBatch.current_owner === profile?.id ? '✅ MATCH' : '❌ MISMATCH'
+        });
+        
+        // Verify the update actually worked
+        if (updatedBatch.current_owner !== profile?.id) {
+          console.error('❌ CRITICAL: Ownership update did not match! Expected:', profile?.id, 'Got:', updatedBatch.current_owner);
+          throw new Error('Ownership update verification failed. Please try again.');
+        }
+      } else {
+        console.warn('⚠️ Batch update returned no data - ownership may not have updated');
+        throw new Error('Batch update returned no data');
+      }
+
+      // Update marketplace quantity and status
+      // If all quantity is purchased, mark as sold, otherwise reduce quantity
+      const marketplaceUpdateData: any = {
+        current_seller_id: profile?.id,
+        current_seller_type: profile?.user_type || (profile?.full_name?.toLowerCase().includes('distributor') ? 'distributor' : 'retailer')
+      };
+
+      if (remainingQuantity <= 0) {
+        // All quantity sold - mark as sold
+        marketplaceUpdateData.status = 'sold';
+        marketplaceUpdateData.quantity = 0;
+        console.log('🔍 DEBUG: All quantity purchased, marking marketplace as sold');
+      } else {
+        // Reduce quantity, keep as available
+        marketplaceUpdateData.status = 'available';
+        marketplaceUpdateData.quantity = remainingQuantity;
+        console.log('🔍 DEBUG: Reducing marketplace quantity to:', remainingQuantity);
+      }
+
+      // Find marketplace record by batch_id (not batch.id which might be marketplace ID)
       const { error: marketplaceError } = await supabase
         .from('marketplace')
-        .update({ 
-          status: 'available', // Keep as available for the new owner
-          current_seller_id: profile?.id,
-          current_seller_type: profile?.full_name?.toLowerCase() === 'distributor' ? 'distributor' : 'retailer'
-        })
-        .eq('id', batch.id);
+        .update(marketplaceUpdateData)
+        .eq('batch_id', batchId);
 
       if (marketplaceError) {
         console.warn('Failed to update marketplace:', marketplaceError);
+        // Try alternative: update by marketplace ID if batch.id is marketplace ID
+        if (batch.id && typeof batch.id === 'number') {
+          const { error: altMarketplaceError } = await supabase
+            .from('marketplace')
+            .update(marketplaceUpdateData)
+            .eq('id', batch.id);
+          
+          if (altMarketplaceError) {
+            console.warn('Failed to update marketplace by ID:', altMarketplaceError);
+          } else {
+            console.log('✅ Marketplace updated by ID');
+          }
+        }
         // Don't fail the purchase for this
+      } else {
+        console.log('✅ Marketplace updated successfully:', marketplaceUpdateData);
       }
 
       console.log('🔍 DEBUG: Purchase successful!');
       console.log('🔍 DEBUG: Profile data:', profile);
       console.log('🔍 DEBUG: User type:', profile?.user_type);
 
-      // Create inventory entry for distributor/retailer
-      // Check if user is distributor based on full_name or user_type (case-insensitive)
+      // Determine transaction type based on buyer's role
       const isDistributor = profile?.user_type === 'distributor' || 
-                           profile?.full_name?.toLowerCase() === 'distributor';
+                           profile?.full_name?.toLowerCase().includes('distributor');
       const isRetailer = profile?.user_type === 'retailer' || 
-                        profile?.full_name?.toLowerCase() === 'retailer';
+                        profile?.full_name?.toLowerCase().includes('retailer');
       
+      // Use RETAIL type when retailer buys from distributor, PURCHASE otherwise
+      const transactionType = isRetailer ? 'RETAIL' : 'PURCHASE';
+      
+      console.log('🔍 DEBUG: Transaction type determined:', {
+        user_type: profile?.user_type,
+        full_name: profile?.full_name,
+        isDistributor,
+        isRetailer,
+        transactionType
+      });
+
+      // Create transaction record in transactions table
+      // Use the sellerId we captured BEFORE the ownership update
+      let transactionResult: any = null;
+      try {
+        const transactionId = `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        // sellerId was already captured above before ownership update
+        
+        console.log('🔍 DEBUG: Transaction creation details:', {
+          batchId,
+          sellerId, // This is the OLD owner (who we bought FROM)
+          buyerId: profile?.id, // This is the NEW owner (who bought it)
+          transactionType,
+          updatedBatchCurrentOwner: updatedBatch?.current_owner // Should match buyerId
+        });
+        
+        const transactionData = {
+          transaction_id: transactionId,
+          batch_id: batchId.toString(),
+          type: transactionType,
+          from_address: sellerId || 'unknown',
+          to_address: profile?.id || 'unknown',
+          quantity: quantity,
+          price: finalTotal,
+          transaction_timestamp: new Date().toISOString(),
+          ipfs_hash: '', // Will be updated after certificate generation
+          blockchain_hash: '', // Will be updated after blockchain transaction
+          product_details: {
+            crop_type: batch.crop_type || batch.batches?.crop_type,
+            variety: batch.variety || batch.batches?.variety,
+            quantity: quantity,
+            price_per_kg: unitPrice
+          },
+          metadata: {
+            delivery_address: address,
+            buyer_name: profile?.full_name,
+            buyer_type: profile?.user_type,
+            seller_name: batch.profiles?.full_name || batch.batches?.profiles?.full_name,
+            transactionType: transactionType
+          }
+        };
+
+        const { data: transactionDataResult, error: transactionError } = await supabase
+          .from('transactions')
+          .insert(transactionData)
+          .select()
+          .single();
+
+        if (transactionError) {
+          console.warn('⚠️ Failed to create transaction record:', transactionError);
+          // Create a fallback transaction result object
+          transactionResult = { id: transactionId };
+        } else {
+          transactionResult = transactionDataResult;
+          console.log('✅ Transaction record created:', transactionResult);
+        }
+      } catch (transactionCreateError) {
+        console.warn('⚠️ Error creating transaction record:', transactionCreateError);
+        // Create a fallback transaction result with generated ID
+        transactionResult = { 
+          id: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` 
+        };
+      }
+
+      // Note: isDistributor and isRetailer are already defined above for transaction type
       console.log('🔍 DEBUG: User type check:', {
         user_type: profile?.user_type,
         full_name: profile?.full_name,
@@ -355,66 +533,244 @@ export const UltraSimplePurchaseModal: React.FC<UltraSimplePurchaseModalProps> =
             try {
               console.log('🔍 DEBUG: Generating purchase certificate...');
               
-              // Get the group ID from the batch data
-              // The group_id is directly on the batch object, not nested in batch.batches
-              const groupId = batch.group_id || batch.batches?.group_id;
+              // CRITICAL: Fetch group_id from database to ensure we use the correct group
+              // This ensures purchase certificates are added to the same group as harvest certificate
+              let groupId = batch.group_id || batch.batches?.group_id;
+              
+              // If group_id not in batch object, fetch from database
+              if (!groupId && batchId) {
+                console.log('🔍 DEBUG: Group ID not in batch object, fetching from database...');
+                try {
+                  const { data: batchData, error: batchFetchError } = await supabase
+                    .from('batches')
+                    .select('group_id')
+                    .eq('id', batchId)
+                    .single();
+                  
+                  if (!batchFetchError && batchData?.group_id) {
+                    groupId = batchData.group_id;
+                    console.log('✅ Fetched group_id from database:', groupId);
+                  } else {
+                    console.error('❌ Failed to fetch group_id from database:', batchFetchError);
+                  }
+                } catch (fetchError) {
+                  console.error('❌ Error fetching group_id:', fetchError);
+                }
+              }
+              
               console.log('🔍 DEBUG: Group ID lookup:', {
                 batchGroupId: batch.group_id,
                 batchBatchesGroupId: batch.batches?.group_id,
-                finalGroupId: groupId
+                finalGroupId: groupId,
+                batchId: batchId
               });
               
               if (!groupId) {
-                console.warn('⚠️ No group ID found for batch, skipping certificate generation');
-                console.warn('🔍 DEBUG: Batch object keys:', Object.keys(batch));
-                console.warn('🔍 DEBUG: Batch object:', batch);
-                return;
+                console.error('❌ CRITICAL: No group ID found for batch! Cannot add purchase certificate to group.');
+                console.error('🔍 DEBUG: Batch object keys:', Object.keys(batch));
+                console.error('🔍 DEBUG: Batch object:', batch);
+                console.error('🔍 DEBUG: Batch ID:', batchId);
+                toast({
+                  variant: "destructive",
+                  title: "Certificate Upload Failed",
+                  description: "Could not find group ID for this batch. Purchase completed but certificate not uploaded.",
+                });
+                // Don't return - continue with purchase even if certificate fails
+              } else {
+              
+              // Resolve seller and buyer names from profile IDs for display
+              let sellerName = 'Unknown Seller';
+              let buyerName = 'Unknown Buyer';
+              
+              try {
+                if (sellerId) {
+                  const { data: sellerProfile } = await supabase
+                    .from('profiles')
+                    .select('full_name, user_type')
+                    .eq('id', sellerId)
+                    .single();
+                  
+                  if (sellerProfile?.full_name) {
+                    sellerName = `${sellerProfile.user_type ? sellerProfile.user_type.charAt(0).toUpperCase() + sellerProfile.user_type.slice(1) : ''} - ${sellerProfile.full_name}`.trim();
+                    if (sellerName.startsWith(' - ')) sellerName = sellerName.substring(3);
+                  }
+                }
+              } catch (e) {
+                console.warn('Could not resolve seller name:', e);
+                sellerName = batch.profiles?.full_name || batch.batches?.profiles?.full_name || 'Unknown Seller';
+              }
+              
+              try {
+                if (profile?.id) {
+                  const { data: buyerProfile } = await supabase
+                    .from('profiles')
+                    .select('full_name, user_type')
+                    .eq('id', profile.id)
+                    .single();
+                  
+                  if (buyerProfile?.full_name) {
+                    buyerName = `${buyerProfile.user_type ? buyerProfile.user_type.charAt(0).toUpperCase() + buyerProfile.user_type.slice(1) : ''} - ${buyerProfile.full_name}`.trim();
+                    if (buyerName.startsWith(' - ')) buyerName = buyerName.substring(3);
+                  }
+                }
+              } catch (e) {
+                console.warn('Could not resolve buyer name:', e);
+                buyerName = profile?.full_name || 'Unknown Buyer';
               }
               
               const purchaseData = {
-                batchId: batchId, // Use the validated batch ID
-                from: batch.profiles?.full_name || 'Unknown Seller',
-                to: profile?.full_name || 'Unknown Buyer',
+                batchId: batchId.toString(), // Use the validated batch ID
+                from: sellerId || 'Unknown Seller', // Store seller ID (UUID) for proper resolution
+                to: profile?.id || 'Unknown Buyer', // Store buyer ID (UUID) for proper resolution
                 quantity: quantity,
                 pricePerKg: Math.round(finalTotal / quantity),
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                sellerName: sellerName, // Store resolved name for display
+                buyerName: buyerName // Store resolved name for display
               };
               
               console.log('🔍 DEBUG: Purchase data:', purchaseData);
               console.log('🔍 DEBUG: Group ID:', groupId);
+              console.log('🔍 DEBUG: Seller ID:', sellerId, 'Seller Name:', sellerName);
+              console.log('🔍 DEBUG: Buyer ID:', profile?.id, 'Buyer Name:', buyerName);
               
               const purchaseCertificateResult = await singleStepGroupManager.uploadPurchaseCertificate(
                 groupId,
                 purchaseData
               );
-              console.log('✅ Purchase certificate generated:', purchaseCertificateResult);
+              
+                if (purchaseCertificateResult) {
+                  console.log('✅ Purchase certificate generated and uploaded to group:', purchaseCertificateResult);
+                  console.log('✅ Group ID used:', groupId);
+                  console.log('✅ IPFS Hash:', purchaseCertificateResult.ipfsHash);
+                  console.log('✅ Full traceability chain maintained - certificate added to same group as harvest');
+                  
+                  // Note: storeFileReference is automatically called by uploadFileToGroup
+                  // So the transaction is already stored in group_files table
+                  toast({
+                    title: "Purchase Certificate Added",
+                    description: `Purchase certificate added to group ${groupId.substring(0, 8)}... for complete traceability.`,
+                  });
+                } else {
+                  console.error('❌ CRITICAL: Purchase certificate upload failed!');
+                  console.error('❌ Group ID:', groupId);
+                  console.error('❌ Batch ID:', batchId);
+                  
+                  // Even if certificate upload failed, store transaction record in group_files for traceability
+                  if (groupId) {
+                    try {
+                      const groupFileData = {
+                        group_id: groupId,
+                        file_name: `purchase_transaction_${batchId}_${Date.now()}.json`,
+                        ipfs_hash: '', // No certificate hash if upload failed
+                        file_size: 0,
+                        transaction_type: transactionType,
+                        batch_id: batchId,
+                        metadata: JSON.stringify({
+                          keyvalues: {
+                            batchId: batchId.toString(),
+                            transactionType: transactionType,
+                            from: sellerId,
+                            to: profile?.id,
+                            quantity: quantity.toString(),
+                            price: finalTotal.toString(),
+                            timestamp: new Date().toISOString(),
+                            farmerName: sellerName,
+                            buyerName: buyerName,
+                            fromId: sellerId,
+                            toId: profile?.id,
+                            pricePerKg: Math.round(finalTotal / quantity).toString(),
+                            certificateUploadFailed: true
+                          }
+                        }),
+                        created_at: new Date().toISOString()
+                      };
+                      
+                      const { error: groupFileError } = await supabase
+                        .from('group_files')
+                        .insert(groupFileData);
+                      
+                      if (groupFileError) {
+                        console.error('❌ Failed to store purchase transaction in group_files:', groupFileError);
+                      } else {
+                        console.log('✅ Purchase transaction stored in group_files (without certificate)');
+                      }
+                    } catch (groupFileErr) {
+                      console.error('❌ Error storing purchase transaction in group_files:', groupFileErr);
+                    }
+                  }
+                  
+                  toast({
+                    variant: "destructive",
+                    title: "Certificate Upload Failed",
+                    description: "Purchase completed but certificate upload failed. Transaction recorded in database.",
+                  });
+                }
+              }
+              
+              // Update transaction record with IPFS hash and blockchain hash if available
+              if (transactionResult?.id || transactionResult?.transaction_id) {
+                try {
+                  const updateData: any = {};
+                  if (purchaseCertificateResult?.ipfsHash) {
+                    updateData.ipfs_hash = purchaseCertificateResult.ipfsHash;
+                  }
+                  if (blockchainTransaction?.transactionHash) {
+                    updateData.blockchain_hash = blockchainTransaction.transactionHash;
+                  }
+                  
+                  if (Object.keys(updateData).length > 0) {
+                    const updateField = transactionResult.id ? 'id' : 'transaction_id';
+                    const updateValue = transactionResult.id || transactionResult.transaction_id;
+                    
+                    await supabase
+                      .from('transactions')
+                      .update(updateData)
+                      .eq(updateField, updateValue);
+                    
+                    console.log('✅ Transaction record updated with IPFS and blockchain hashes');
+                  }
+                } catch (updateError) {
+                  console.warn('⚠️ Failed to update transaction record:', updateError);
+                }
+              }
               
               // Generate QR code for the purchase transaction
+              // Use transactionResult.id if available, otherwise use a generated ID
+              const transactionIdForQR = transactionResult?.id || 
+                                        transactionResult?.transaction_id || 
+                                        `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              
+              if (transactionIdForQR) {
               try {
                 const { generateTransactionReceiptQR } = await import('@/utils/qrCodeGenerator');
                 const qrCodeDataURL = await generateTransactionReceiptQR({
-                  transactionId: transactionResult.id,
-                  batchId: batchId,
+                    transactionId: transactionIdForQR,
+                    batchId: batchId.toString(),
                   from: batch.profiles?.full_name || 'Unknown Seller',
                   to: profile?.full_name || 'Unknown Buyer',
                   quantity: quantity,
                   price: finalTotal,
                   timestamp: new Date().toISOString(),
-                  ipfsHash: purchaseCertificateResult?.ipfsHash,
-                  blockchainHash: blockchainTransaction?.transactionHash
+                    ipfsHash: purchaseCertificateResult?.ipfsHash || undefined,
+                    blockchainHash: blockchainTransaction?.transactionHash || undefined
                 });
                 
                 console.log('✅ QR code generated for purchase transaction');
                 
                 // Store QR code in localStorage for later access
-                localStorage.setItem(`purchase_qr_${transactionResult.id}`, qrCodeDataURL);
+                  localStorage.setItem(`purchase_qr_${transactionIdForQR}`, qrCodeDataURL);
               } catch (qrError) {
                 console.error('❌ QR code generation failed:', qrError);
                 // Continue even if QR code generation fails
+                }
+              } else {
+                console.warn('⚠️ Skipping QR code generation: no transaction ID available');
               }
             } catch (certError) {
               console.error('❌ Purchase certificate generation failed:', certError);
-              // Continue even if certificate generation fails
+              console.warn('⚠️ Purchase will continue without certificate');
+              // Continue even if certificate generation fails - don't throw
             }
           }
         } catch (blockchainError) {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { FarmerDashboard } from './FarmerDashboard';
 import { DistributorDashboard } from './DistributorDashboard';
@@ -7,6 +8,7 @@ import { Loader2 } from 'lucide-react';
 
 export const UnifiedDashboard = () => {
   const { user, loading } = useAuth();
+  const navigate = useNavigate();
   const [userType, setUserType] = useState<string | null>(null);
 
   useEffect(() => {
@@ -30,8 +32,13 @@ export const UnifiedDashboard = () => {
       }
       
       setUserType(effectiveUserType);
+      
+      // Redirect helpers to Helper Desk
+      if (effectiveUserType === 'helper') {
+        navigate('/helper-desk', { replace: true });
+      }
     }
-  }, [user]);
+  }, [user, navigate]);
 
   if (loading) {
     return (
@@ -64,11 +71,12 @@ export const UnifiedDashboard = () => {
     case 'retailer':
       return <RetailerDashboard />;
     case 'helper':
+      // This should redirect via useEffect above, but show loading state just in case
       return (
         <div className="min-h-screen flex items-center justify-center">
           <div className="text-center">
-            <h2 className="text-2xl font-bold mb-4">Helper Dashboard</h2>
-            <p className="text-gray-600">Helper dashboard is coming soon!</p>
+            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p className="text-gray-600">Redirecting to Helper Desk...</p>
           </div>
         </div>
       );

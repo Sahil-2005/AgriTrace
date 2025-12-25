@@ -233,11 +233,16 @@ export class TransactionManager {
 
       // If batch has a group_id, get files from group_files table
       if (batch.group_id) {
+        // Fetch ALL transaction types from group_files
         const { data: groupFiles, error: groupError } = await (supabase as any)
           .from('group_files')
           .select('*')
           .eq('group_id', batch.group_id)
+          .in('transaction_type', ['HARVEST', 'PURCHASE', 'RETAIL', 'TRANSFER'])
           .order('created_at', { ascending: true });
+        
+        console.log('🔍 DEBUG: Fetched group_files:', groupFiles?.length, 'files');
+        console.log('🔍 DEBUG: Group files transaction types:', groupFiles?.map((f: any) => f.transaction_type));
 
         if (groupError) {
           console.error('Error fetching group files:', groupError);
@@ -321,13 +326,73 @@ export class TransactionManager {
             fromName = storedFarmerName || farmerName || await nameResolver.resolveName(fromIdentifier || 'Unknown Farmer');
             toName = storedFarmerName || farmerName || await nameResolver.resolveName(toIdentifier || 'Unknown Farmer');
             console.log('🔍 DEBUG: HARVEST transaction - fromName:', fromName, 'toName:', toName);
-          } else if (file.transaction_type === 'PURCHASE') {
-            // For purchase transactions: Get actual seller and buyer names
-            fromName = storedFarmerName || farmerName || await nameResolver.resolveName(fromIdentifier || 'Unknown Seller');
-            toName = storedBuyerName || await nameResolver.resolveName(toIdentifier || 'Unknown Buyer');
-            console.log('🔍 DEBUG: PURCHASE transaction - fromName:', fromName, 'toName:', toName);
+          } else if (file.transaction_type === 'PURCHASE' || file.transaction_type === 'RETAIL') {
+            // For purchase/retail transactions: Get actual seller and buyer names
+            // IMPORTANT: fromIdentifier/toIdentifier might be profile IDs (UUIDs), resolve them
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            
+            // Resolve seller (from) - could be farmer or distributor
+            if (uuidRegex.test(fromIdentifier)) {
+              try {
+                const { data: fromProfile } = await (supabase as any)
+                  .from('profiles')
+                  .select('full_name, user_type')
+                  .eq('id', fromIdentifier)
+                  .single();
+                
+                if (fromProfile?.full_name) {
+                  // Format: "UserType - Name" but avoid duplicates
+                  let name = fromProfile.full_name;
+                  if (fromProfile.user_type) {
+                    const userTypePrefix = fromProfile.user_type.charAt(0).toUpperCase() + fromProfile.user_type.slice(1);
+                    // Check if name already starts with user type to avoid duplication
+                    if (!name.toLowerCase().startsWith(fromProfile.user_type.toLowerCase())) {
+                      name = `${userTypePrefix} - ${name}`;
+                    }
+                  }
+                  fromName = name.trim();
+                }
+              } catch (e) {
+                console.warn('Could not resolve fromIdentifier (seller):', fromIdentifier);
+                fromName = storedFarmerName || farmerName || await nameResolver.resolveName(fromIdentifier || 'Unknown Seller');
+              }
+            } else {
+              fromName = storedFarmerName || farmerName || await nameResolver.resolveName(fromIdentifier || 'Unknown Seller');
+            }
+            
+            // Resolve buyer (to) - could be distributor or retailer
+            if (uuidRegex.test(toIdentifier)) {
+              try {
+                const { data: toProfile } = await (supabase as any)
+                  .from('profiles')
+                  .select('full_name, user_type')
+                  .eq('id', toIdentifier)
+                  .single();
+                
+                if (toProfile?.full_name) {
+                  // Format: "UserType - Name" but avoid duplicates
+                  let name = toProfile.full_name;
+                  if (toProfile.user_type) {
+                    const userTypePrefix = toProfile.user_type.charAt(0).toUpperCase() + toProfile.user_type.slice(1);
+                    // Check if name already starts with user type to avoid duplication
+                    if (!name.toLowerCase().startsWith(toProfile.user_type.toLowerCase())) {
+                      name = `${userTypePrefix} - ${name}`;
+                    }
+                  }
+                  toName = name.trim();
+                }
+              } catch (e) {
+                console.warn('Could not resolve toIdentifier (buyer):', toIdentifier);
+                toName = storedBuyerName || await nameResolver.resolveName(toIdentifier || 'Unknown Buyer');
+              }
+            } else {
+              toName = storedBuyerName || await nameResolver.resolveName(toIdentifier || 'Unknown Buyer');
+            }
+            
+            console.log('🔍 DEBUG: PURCHASE/RETAIL transaction - fromName:', fromName, 'toName:', toName);
+            console.log('🔍 DEBUG: fromIdentifier:', fromIdentifier, 'toIdentifier:', toIdentifier);
             console.log('🔍 DEBUG: storedFarmerName:', storedFarmerName, 'farmerName:', farmerName);
-            console.log('🔍 DEBUG: storedBuyerName:', storedBuyerName, 'toIdentifier:', toIdentifier);
+            console.log('🔍 DEBUG: storedBuyerName:', storedBuyerName);
           } else {
             // For other transactions, use name resolver for both
             fromName = await nameResolver.resolveName(fromIdentifier || 'Unknown');
@@ -368,7 +433,103 @@ export class TransactionManager {
           transactions.push(cleanedTransaction);
         }
 
-        console.log(`Found ${transactions.length} transactions for batch ${batchId}`);
+        console.log(`Found ${transactions.length} transactions for batch ${batchId} from group_files`);
+        
+        // Also check transactions table for any additional transactions
+        try {
+          const { data: dbTransactions, error: dbError } = await (supabase as any)
+            .from('transactions')
+            .select('*')
+            .eq('batch_id', batchId)
+            .order('transaction_timestamp', { ascending: true });
+          
+          if (!dbError && dbTransactions && dbTransactions.length > 0) {
+            console.log(`Found ${dbTransactions.length} additional transactions from transactions table`);
+            // Merge transactions from both sources
+            const dbTransactionsMapped = await Promise.all(
+              dbTransactions.map(async (record: any) => {
+                // Resolve profile IDs to names
+                let fromName = record.from_address;
+                let toName = record.to_address;
+                
+                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                
+                if (uuidRegex.test(record.from_address)) {
+                  try {
+                    const { data: fromProfile } = await (supabase as any)
+                      .from('profiles')
+                      .select('full_name, user_type')
+                      .eq('id', record.from_address)
+                      .single();
+                    
+                    if (fromProfile?.full_name) {
+                      // Format: "UserType - Name" but avoid duplicates
+                      let name = fromProfile.full_name;
+                      if (fromProfile.user_type) {
+                        const userTypePrefix = fromProfile.user_type.charAt(0).toUpperCase() + fromProfile.user_type.slice(1);
+                        // Check if name already starts with user type to avoid duplication
+                        if (!name.toLowerCase().startsWith(fromProfile.user_type.toLowerCase())) {
+                          name = `${userTypePrefix} - ${name}`;
+                        }
+                      }
+                      fromName = name.trim();
+                    }
+                  } catch (e) {
+                    console.warn('Could not resolve from_address:', record.from_address);
+                  }
+                }
+                
+                if (uuidRegex.test(record.to_address)) {
+                  try {
+                    const { data: toProfile } = await (supabase as any)
+                      .from('profiles')
+                      .select('full_name, user_type')
+                      .eq('id', record.to_address)
+                      .single();
+                    
+                    if (toProfile?.full_name) {
+                      // Format: "UserType - Name" but avoid duplicates
+                      let name = toProfile.full_name;
+                      if (toProfile.user_type) {
+                        const userTypePrefix = toProfile.user_type.charAt(0).toUpperCase() + toProfile.user_type.slice(1);
+                        // Check if name already starts with user type to avoid duplication
+                        if (!name.toLowerCase().startsWith(toProfile.user_type.toLowerCase())) {
+                          name = `${userTypePrefix} - ${name}`;
+                        }
+                      }
+                      toName = name.trim();
+                    }
+                  } catch (e) {
+                    console.warn('Could not resolve to_address:', record.to_address);
+                  }
+                }
+                
+                return this.mapDatabaseToTransaction({
+                  ...record,
+                  from_address: fromName,
+                  to_address: toName
+                });
+              })
+            );
+            
+            // Merge and deduplicate by transaction ID
+            const allTransactions = [...transactions];
+            for (const dbTx of dbTransactionsMapped) {
+              if (!allTransactions.find(t => t.transactionId === dbTx.transactionId)) {
+                allTransactions.push(dbTx);
+              }
+            }
+            
+            // Sort by timestamp
+            allTransactions.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+            
+            console.log(`Total transactions after merge: ${allTransactions.length}`);
+            return allTransactions;
+          }
+        } catch (dbError) {
+          console.warn('Could not fetch from transactions table:', dbError);
+        }
+        
         return transactions;
       }
 
@@ -385,7 +546,77 @@ export class TransactionManager {
           return [];
         }
 
-        return (data || []).map((record: any) => this.mapDatabaseToTransaction(record));
+        // Resolve profile IDs to names for transactions table records
+        const transactionsWithNames = await Promise.all(
+          (data || []).map(async (record: any) => {
+            // Resolve from_address and to_address (profile IDs) to names
+            let fromName = record.from_address;
+            let toName = record.to_address;
+            
+            // Check if they're UUIDs (profile IDs) or already names
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            
+            if (uuidRegex.test(record.from_address)) {
+              // It's a UUID, resolve to name
+              try {
+                const { data: fromProfile } = await (supabase as any)
+                  .from('profiles')
+                  .select('full_name, user_type')
+                  .eq('id', record.from_address)
+                  .single();
+                
+                if (fromProfile?.full_name) {
+                  // Format: "UserType - Name" but avoid duplicates
+                  let name = fromProfile.full_name;
+                  if (fromProfile.user_type) {
+                    const userTypePrefix = fromProfile.user_type.charAt(0).toUpperCase() + fromProfile.user_type.slice(1);
+                    // Check if name already starts with user type to avoid duplication
+                    if (!name.toLowerCase().startsWith(fromProfile.user_type.toLowerCase())) {
+                      name = `${userTypePrefix} - ${name}`;
+                    }
+                  }
+                  fromName = name.trim();
+                }
+              } catch (e) {
+                console.warn('Could not resolve from_address:', record.from_address);
+              }
+            }
+            
+            if (uuidRegex.test(record.to_address)) {
+              // It's a UUID, resolve to name
+              try {
+                const { data: toProfile } = await (supabase as any)
+                  .from('profiles')
+                  .select('full_name, user_type')
+                  .eq('id', record.to_address)
+                  .single();
+                
+                if (toProfile?.full_name) {
+                  // Format: "UserType - Name" but avoid duplicates
+                  let name = toProfile.full_name;
+                  if (toProfile.user_type) {
+                    const userTypePrefix = toProfile.user_type.charAt(0).toUpperCase() + toProfile.user_type.slice(1);
+                    // Check if name already starts with user type to avoid duplication
+                    if (!name.toLowerCase().startsWith(toProfile.user_type.toLowerCase())) {
+                      name = `${userTypePrefix} - ${name}`;
+                    }
+                  }
+                  toName = name.trim();
+                }
+              } catch (e) {
+                console.warn('Could not resolve to_address:', record.to_address);
+              }
+            }
+            
+            return this.mapDatabaseToTransaction({
+              ...record,
+              from_address: fromName,
+              to_address: toName
+            });
+          })
+        );
+        
+        return transactionsWithNames;
       } catch (error) {
         console.warn('Transactions table not available in group-based system, returning empty array for batch:', batchId);
         return [];
@@ -457,8 +688,8 @@ export class TransactionManager {
           };
           totalQuantity = transaction.quantity;
           availableQuantity = transaction.quantity;
-        } else if (transaction.type === 'PURCHASE' || transaction.type === 'TRANSFER') {
-          // Transfer ownership
+        } else if (transaction.type === 'PURCHASE' || transaction.type === 'RETAIL' || transaction.type === 'TRANSFER') {
+          // Transfer ownership - RETAIL is when retailer buys from distributor
           if (currentOwners[transaction.from]) {
             currentOwners[transaction.from].quantity -= transaction.quantity;
             if (currentOwners[transaction.from].quantity <= 0) {

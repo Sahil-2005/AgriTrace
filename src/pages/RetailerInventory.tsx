@@ -93,20 +93,37 @@ export const RetailerInventory = () => {
 
       console.log('🔍 DEBUG: Batch data:', batchData);
 
-      // Get seller IDs from marketplace data
-      const sellerIds = marketplaceData?.map(item => item.current_seller_id) || [];
-      console.log('🔍 DEBUG: Seller IDs:', sellerIds);
+      // Get transactions to find who the retailer bought FROM (not current seller)
+      // We need to find the PURCHASE/RETAIL transaction where retailer is the buyer
+      const { data: purchaseTransactions, error: transactionError } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('to_address', profile?.id) // Retailer is the buyer
+        .in('type', ['PURCHASE', 'RETAIL'])
+        .in('batch_id', batchIds);
+
+      console.log('🔍 DEBUG: Purchase transactions for retailer:', purchaseTransactions);
+
+      // Get seller IDs from transactions (who they bought FROM)
+      const sellerIds = purchaseTransactions?.map(tx => tx.from_address).filter(Boolean) || [];
+      
+      // Also get current owner from batch (should be retailer after purchase)
+      const currentOwnerIds = batchData?.map(b => b.current_owner).filter(Boolean) || [];
+      const allProfileIds = [...new Set([...sellerIds, ...currentOwnerIds])];
+      
+      console.log('🔍 DEBUG: Seller IDs from transactions:', sellerIds);
+      console.log('🔍 DEBUG: Current owner IDs from batches:', currentOwnerIds);
+      console.log('🔍 DEBUG: All profile IDs to fetch:', allProfileIds);
 
       // Fetch seller profiles
       const { data: sellerProfiles, error: sellerError } = await supabase
         .from('profiles')
         .select('*')
-        .in('id', sellerIds);
+        .in('id', allProfileIds.length > 0 ? allProfileIds : ['00000000-0000-0000-0000-000000000000']); // Dummy ID if empty
 
       if (sellerError) {
         console.error('❌ Error fetching seller profiles:', sellerError);
-        setInventory([]);
-        return;
+        // Don't fail, just continue without seller profiles
       }
 
       console.log('🔍 DEBUG: Seller profiles:', sellerProfiles);
@@ -115,13 +132,30 @@ export const RetailerInventory = () => {
       const combinedData = inventoryData.map(inventoryItem => {
         const marketplaceItem = marketplaceData?.find(m => m.id === inventoryItem.marketplace_id);
         const batchItem = batchData?.find(b => b.id === marketplaceItem?.batch_id);
-        const sellerProfile = sellerProfiles?.find(s => s.id === marketplaceItem?.current_seller_id);
+        
+        // Find the transaction where retailer bought this batch
+        const purchaseTransaction = purchaseTransactions?.find(
+          tx => tx.batch_id === batchItem?.id && tx.to_address === profile?.id
+        );
+        
+        // Get seller profile from transaction (who they bought FROM)
+        const sellerProfile = purchaseTransaction 
+          ? sellerProfiles?.find(s => s.id === purchaseTransaction.from_address)
+          : sellerProfiles?.find(s => s.id === marketplaceItem?.current_seller_id); // Fallback
+        
+        // Get current owner profile (should be retailer)
+        const currentOwnerProfile = batchItem?.current_owner 
+          ? sellerProfiles?.find(s => s.id === batchItem.current_owner)
+          : null;
 
         return {
           ...inventoryItem,
           marketplace: marketplaceItem,
-          batch: batchItem,
-          seller: sellerProfile
+          batch: {
+            ...batchItem,
+            current_owner_profile: currentOwnerProfile // Add current owner profile
+          },
+          seller: sellerProfile // This is who they bought FROM
         };
       });
 
@@ -135,15 +169,57 @@ export const RetailerInventory = () => {
     }
   };
 
-  const handleViewDetails = (item: any) => {
-    // Convert inventory item to batch format for BatchDetailsModal
+  const handleViewDetails = async (item: any) => {
+    try {
+      // ALWAYS fetch current owner from batch's current_owner field (source of truth)
+      let currentOwnerProfile = null;
+      if (item.batch?.current_owner) {
+        try {
+          const { data: ownerProfile } = await supabase
+            .from('profiles')
+            .select('id, full_name, farm_location, user_type')
+            .eq('id', item.batch.current_owner)
+            .single();
+          
+          currentOwnerProfile = ownerProfile;
+          console.log('🔍 DEBUG: Fetched current owner profile:', currentOwnerProfile);
+        } catch (ownerError) {
+          console.warn('Could not fetch current owner profile:', ownerError);
+        }
+      }
+      
+      // Structure data the same way Marketplace does - with nested batches structure
+      // This ensures consistent UI rendering across all pages
+      const batchData = {
+        ...item.marketplace, // Marketplace fields (price, quantity, status, etc.)
+        batches: {
+          ...item.batch,
+          profiles: currentOwnerProfile || item.batch?.current_owner_profile || item.seller, // ALWAYS use current owner from batch
+          current_owner_profile: currentOwnerProfile || item.batch?.current_owner_profile, // Current owner (retailer)
+        },
+        profiles: currentOwnerProfile || item.batch?.current_owner_profile || item.seller, // ALWAYS use current owner
+      };
+      
+      console.log('🔍 DEBUG: Batch data for modal:', batchData);
+      console.log('🔍 DEBUG: Current owner ID:', item.batch?.current_owner);
+      console.log('🔍 DEBUG: Current owner profile:', currentOwnerProfile);
+      
+      setSelectedBatch(batchData);
+      setIsDetailsModalOpen(true);
+    } catch (error) {
+      console.error('Error preparing batch details:', error);
+      // Fallback
     const batchData = {
+        ...item.marketplace,
+        batches: {
       ...item.batch,
       profiles: item.seller,
-      marketplace: item.marketplace
+        },
+        profiles: item.seller,
     };
     setSelectedBatch(batchData);
     setIsDetailsModalOpen(true);
+    }
   };
 
   if (loading) {

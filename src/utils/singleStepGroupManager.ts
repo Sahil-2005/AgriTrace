@@ -104,6 +104,48 @@ export class SingleStepGroupManager {
   }
 
   /**
+   * Validate JWT token format and expiration
+   */
+  private validateJWT(): void {
+    if (!PINATA_CONFIG.jwt) {
+      throw new Error('Pinata JWT token is not configured');
+    }
+    
+    try {
+      // Decode JWT (simple base64 decode, no verification)
+      const parts = PINATA_CONFIG.jwt.split('.');
+      if (parts.length !== 3) {
+        throw new Error('Invalid JWT format');
+      }
+      
+      const payload = JSON.parse(atob(parts[1]));
+      const exp = payload.exp;
+      
+      if (exp) {
+        const expirationDate = new Date(exp * 1000);
+        const now = new Date();
+        
+        if (now >= expirationDate) {
+          console.error('❌ JWT token has expired:', {
+            expiredAt: expirationDate.toISOString(),
+            currentTime: now.toISOString()
+          });
+          throw new Error(`Pinata JWT token expired on ${expirationDate.toISOString()}. Please update your PINATA_JWT configuration.`);
+        } else {
+          const timeUntilExpiry = expirationDate.getTime() - now.getTime();
+          const hoursUntilExpiry = timeUntilExpiry / (1000 * 60 * 60);
+          console.log(`✅ JWT token valid. Expires in ${hoursUntilExpiry.toFixed(2)} hours`);
+        }
+      }
+    } catch (error: any) {
+      if (error.message.includes('expired')) {
+        throw error;
+      }
+      console.warn('⚠️ Could not validate JWT token:', error.message);
+    }
+  }
+
+  /**
    * Upload file directly to a Pinata group in single step using group_id parameter
    */
   public async uploadFileToGroup(
@@ -113,6 +155,9 @@ export class SingleStepGroupManager {
     metadata: any
   ): Promise<string> {
     try {
+      // Validate JWT before attempting upload
+      this.validateJWT();
+      
       console.log('Uploading file to Pinata group in SINGLE STEP:', groupId);
       console.log('File name:', fileName);
       console.log('File size:', fileBlob.size);
@@ -145,24 +190,161 @@ export class SingleStepGroupManager {
       }
 
       console.log('Making SINGLE-STEP request to v3/files endpoint with group_id...');
-      
-      // Single API call - file uploaded directly to group!
-      const response = await fetch("https://uploads.pinata.cloud/v3/files", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${PINATA_CONFIG.jwt}`,
-        },
-        body: formData,
+      console.log('📤 Upload details:', {
+        fileName,
+        fileSize: fileBlob.size,
+        fileType: fileBlob.type,
+        groupId,
+        hasMetadata: !!metadata,
+        jwtLength: PINATA_CONFIG.jwt?.length || 0
       });
+      
+      // Retry logic for network errors
+      const maxRetries = 3;
+      const retryDelay = 2000; // 2 seconds
+      let lastError: any = null;
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`🔄 Upload attempt ${attempt}/${maxRetries}...`);
+          
+          // Create a new AbortController for timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+          
+          // Single API call - file uploaded directly to group!
+          const response = await fetch("https://uploads.pinata.cloud/v3/files", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${PINATA_CONFIG.jwt}`,
+            },
+            body: formData,
+            signal: controller.signal,
+          });
+          
+          clearTimeout(timeoutId);
+          
+          console.log('📥 Upload response status:', response.status);
+          console.log('📥 Upload response headers:', Object.fromEntries(response.headers.entries()));
+          
+          const responseText = await response.text();
+          console.log('📥 Upload response body (first 500 chars):', responseText.substring(0, 500));
 
-      console.log('Upload response status:', response.status);
+          if (!response.ok) {
+            console.error('❌ Upload failed with status:', response.status);
+            console.error('❌ Full response body:', responseText);
+            console.error('❌ Response headers:', Object.fromEntries(response.headers.entries()));
+            
+            // Try to parse error message
+            let errorMessage = `Failed to upload file: ${response.status}`;
+            try {
+              const errorJson = JSON.parse(responseText);
+              errorMessage = errorJson.error || errorJson.message || errorMessage;
+              console.error('❌ Parsed error:', errorJson);
+            } catch (e) {
+              // Not JSON, use raw text
+              errorMessage = responseText || errorMessage;
+            }
+            
+            // Don't retry on 4xx errors (client errors)
+            if (response.status >= 400 && response.status < 500) {
+              throw new Error(errorMessage);
+            }
+            
+            // Retry on 5xx errors (server errors)
+            if (attempt < maxRetries) {
+              console.warn(`⚠️ Server error, retrying in ${retryDelay}ms...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelay));
+              continue;
+            }
+            
+            throw new Error(errorMessage);
+          }
+
+          // Success - parse response
+          const data = JSON.parse(responseText);
+          const ipfsHash = data.data?.cid || data.cid;
+          const responseGroupId = data.data?.group_id || data.group_id;
+          
+          if (!ipfsHash) {
+            console.error('❌ No IPFS hash in response:', data);
+            throw new Error('No IPFS hash returned from upload');
+          }
+
+          // Verify group association
+          if (responseGroupId === groupId) {
+            console.log(`✅ SINGLE-STEP SUCCESS! File ${fileName} uploaded directly to group ${groupId}`);
+            console.log(`IPFS Hash: ${ipfsHash}`);
+            
+            // Store file reference in database for verification system
+            await this.storeFileReference(groupId, fileName, ipfsHash, fileBlob.size, metadata);
+          } else {
+            console.log(`⚠️ File uploaded but group_id mismatch. Expected: ${groupId}, Got: ${responseGroupId}`);
+          }
+          
+          return ipfsHash;
+          
+        } catch (fetchError: any) {
+          lastError = fetchError;
+          console.error(`❌ Upload attempt ${attempt} failed:`, fetchError);
+          console.error('❌ Error details:', {
+            name: fetchError.name,
+            message: fetchError.message,
+            stack: fetchError.stack
+          });
+          
+          // Check if it's an abort (timeout)
+          if (fetchError.name === 'AbortError') {
+            console.error('❌ Upload timed out after 60 seconds');
+            if (attempt < maxRetries) {
+              console.warn(`⚠️ Retrying after timeout...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelay));
+              continue;
+            }
+            throw new Error(`Upload timed out after ${maxRetries} attempts. Please check your internet connection and try again.`);
+          }
+          
+          // Check if it's a network error
+          if (fetchError.message?.includes('Failed to fetch') || fetchError.name === 'TypeError') {
+            if (attempt < maxRetries) {
+              console.warn(`⚠️ Network error, retrying in ${retryDelay}ms...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelay));
+              continue;
+            }
+            throw new Error(`Network error: Unable to connect to Pinata after ${maxRetries} attempts. Please check your internet connection and try again. Original error: ${fetchError.message}`);
+          }
+          
+          // For other errors, don't retry
+          throw fetchError;
+        }
+      }
+      
+      // If we get here, all retries failed
+      throw lastError || new Error('Upload failed after all retry attempts');
+
+      console.log('📥 Upload response status:', response.status);
+      console.log('📥 Upload response headers:', Object.fromEntries(response.headers.entries()));
+      
       const responseText = await response.text();
-      console.log('Upload response body:', responseText);
+      console.log('📥 Upload response body (first 500 chars):', responseText.substring(0, 500));
 
       if (!response.ok) {
-        console.error('Upload failed with status:', response.status);
-        console.error('Response body:', responseText);
-        throw new Error(`Failed to upload file: ${response.status} ${responseText}`);
+        console.error('❌ Upload failed with status:', response.status);
+        console.error('❌ Full response body:', responseText);
+        console.error('❌ Response headers:', Object.fromEntries(response.headers.entries()));
+        
+        // Try to parse error message
+        let errorMessage = `Failed to upload file: ${response.status}`;
+        try {
+          const errorJson = JSON.parse(responseText);
+          errorMessage = errorJson.error || errorJson.message || errorMessage;
+          console.error('❌ Parsed error:', errorJson);
+        } catch (e) {
+          // Not JSON, use raw text
+          errorMessage = responseText || errorMessage;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const data = JSON.parse(responseText);
@@ -186,9 +368,23 @@ export class SingleStepGroupManager {
       }
       
       return ipfsHash;
-    } catch (error) {
-      console.error('Error uploading file to group:', error);
-      throw new Error(`Failed to upload file to group: ${error.message}`);
+    } catch (error: any) {
+      console.error('❌ Error uploading file to group:', error);
+      console.error('❌ Error type:', typeof error);
+      console.error('❌ Error name:', error?.name);
+      console.error('❌ Error message:', error?.message);
+      console.error('❌ Error stack:', error?.stack);
+      
+      // Provide more helpful error messages
+      if (error?.message?.includes('Failed to fetch') || error?.name === 'TypeError') {
+        throw new Error(`Network error: Unable to connect to Pinata IPFS service. Please check your internet connection and try again. If the problem persists, the Pinata service may be temporarily unavailable.`);
+      }
+      
+      if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
+        throw new Error(`Authentication error: Invalid Pinata API credentials. Please check your PINATA_JWT configuration.`);
+      }
+      
+      throw new Error(`Failed to upload file to group: ${error?.message || 'Unknown error occurred'}`);
     }
   }
 
@@ -251,6 +447,34 @@ export class SingleStepGroupManager {
   }
 
   /**
+   * Verify if a group exists in Pinata
+   */
+  private async verifyGroupExists(groupId: string): Promise<boolean> {
+    try {
+      const response = await fetch(`https://api.pinata.cloud/v3/groups/${groupId}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${PINATA_CONFIG.jwt}`,
+        },
+      });
+
+      if (response.ok) {
+        console.log(`✅ Group ${groupId} exists`);
+        return true;
+      } else if (response.status === 404) {
+        console.warn(`⚠️ Group ${groupId} not found`);
+        return false;
+      } else {
+        console.warn(`⚠️ Error checking group ${groupId}: ${response.status}`);
+        return false;
+      }
+    } catch (error) {
+      console.error('Error verifying group:', error);
+      return false;
+    }
+  }
+
+  /**
    * Upload purchase certificate to existing group in single step
    */
   public async uploadPurchaseCertificate(
@@ -262,9 +486,21 @@ export class SingleStepGroupManager {
       quantity: number;
       pricePerKg: number;
       timestamp: string;
+      sellerName?: string;
+      buyerName?: string;
     }
-  ): Promise<{ pdfBlob: Blob; ipfsHash: string }> {
+  ): Promise<{ pdfBlob: Blob; ipfsHash: string } | null> {
     try {
+      // Verify group exists before attempting upload
+      const groupExists = await this.verifyGroupExists(groupId);
+      
+      if (!groupExists) {
+        console.warn(`⚠️ Group ${groupId} does not exist. Skipping purchase certificate upload.`);
+        console.warn('⚠️ Purchase will continue without certificate upload.');
+        // Return null instead of throwing error - don't fail the purchase
+        return null;
+      }
+
       // Generate PDF
       const pdfBlob = await this.createPurchasePDF(purchaseData, groupId);
 
@@ -274,15 +510,19 @@ export class SingleStepGroupManager {
         keyvalues: {
           batchId: purchaseData.batchId,
           transactionType: 'PURCHASE',
-          from: purchaseData.from,
-          to: purchaseData.to,
+          from: purchaseData.from, // Keep ID for reference
+          to: purchaseData.to, // Keep ID for reference
           quantity: purchaseData.quantity.toString(),
           price: (purchaseData.quantity * purchaseData.pricePerKg).toString(),
           timestamp: purchaseData.timestamp,
           type: 'certificate',
           groupId: groupId,
-          farmerName: purchaseData.from, // Store farmer name for reference
-          buyerName: purchaseData.to // Store buyer name for reference
+          farmerName: purchaseData.sellerName || purchaseData.from, // Store resolved name
+          buyerName: purchaseData.buyerName || purchaseData.to, // Store resolved name
+          sellerName: purchaseData.sellerName || purchaseData.from, // Alias for clarity
+          // Store both IDs and names for proper resolution
+          fromId: purchaseData.from,
+          toId: purchaseData.to
         }
       };
 
@@ -292,12 +532,14 @@ export class SingleStepGroupManager {
       return { pdfBlob, ipfsHash };
     } catch (error) {
       console.error('Error uploading purchase certificate:', error);
-      throw new Error('Failed to upload purchase certificate');
+      // Don't throw error - return null so purchase can continue
+      console.warn('⚠️ Purchase certificate upload failed, but purchase will continue');
+      return null;
     }
   }
 
   /**
-   * Create harvest PDF
+   * Create harvest PDF with crop analysis
    */
   private async createHarvestPDF(
     batchData: any,
@@ -308,21 +550,196 @@ export class SingleStepGroupManager {
     const { jsPDF } = await import('jspdf');
     
     const pdf = new jsPDF();
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    let yPosition = 20;
     
-    // Add content to PDF
-    pdf.setFontSize(20);
-    pdf.text('AGRITRACE HARVEST CERTIFICATE', 20, 30);
+    // Header
+    pdf.setFontSize(18);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('AGRITRACE HARVEST CERTIFICATE', pageWidth / 2, yPosition, { align: 'center' });
+    yPosition += 15;
     
-    pdf.setFontSize(12);
-    pdf.text(`Batch ID: ${batchData.batchId}`, 20, 50);
-    pdf.text(`Farmer: ${batchData.farmerName}`, 20, 60);
-    pdf.text(`Crop: ${batchData.cropType} - ${batchData.variety}`, 20, 70);
-    pdf.text(`Quantity: ${batchData.harvestQuantity} kg`, 20, 80);
-    pdf.text(`Harvest Date: ${batchData.harvestDate}`, 20, 90);
-    pdf.text(`Grading: ${batchData.grading}`, 20, 100);
-    pdf.text(`Group ID: ${groupId}`, 20, 110);
-    pdf.text(`Group Name: ${groupName}`, 20, 120);
-    pdf.text(`Generated: ${new Date().toISOString()}`, 20, 130);
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('Government of Odisha - Department of Agriculture & Farmers Empowerment', pageWidth / 2, yPosition, { align: 'center' });
+    yPosition += 20;
+    
+    // Certificate number and date
+    pdf.setFontSize(10);
+    pdf.text(`Certificate No: ATC-${batchData.batchId}-${new Date().getFullYear()}`, 20, yPosition);
+    pdf.text(`Date of Issue: ${new Date().toLocaleDateString('en-IN')}`, pageWidth - 20, yPosition, { align: 'right' });
+    yPosition += 15;
+    
+    // Official declaration
+    pdf.setFontSize(14);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('This is to certify that:', 20, yPosition);
+    yPosition += 15;
+    
+    // Product information
+    pdf.setFontSize(11);
+    pdf.setFont('helvetica', 'normal');
+    
+    const productInfo = [
+      { label: 'Product Name', value: `${batchData.cropType} - ${batchData.variety}` },
+      { label: 'Batch Identification Number', value: `ATC-${batchData.batchId}-${new Date().getFullYear()}` },
+      { label: 'Harvest Quantity', value: `${batchData.harvestQuantity} kg` },
+      { label: 'Harvest Date', value: new Date(batchData.harvestDate).toLocaleDateString('en-IN') },
+      { label: 'Quality Grade', value: batchData.grading },
+      { label: 'Certification Level', value: batchData.certification },
+      { label: 'Price per Kg', value: `₹${batchData.pricePerKg}` },
+      { label: 'Total Value', value: `₹${batchData.harvestQuantity * batchData.pricePerKg}` }
+    ];
+    
+    // Create a formal table layout
+    productInfo.forEach((info, index) => {
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(`${info.label}:`, 20, yPosition);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(info.value, 80, yPosition);
+      yPosition += 8;
+    });
+    
+    yPosition += 10;
+    
+    // Crop Health and Soil Analysis Section
+    if (batchData.cropAnalysis) {
+      const analysis = typeof batchData.cropAnalysis === 'string' 
+        ? JSON.parse(batchData.cropAnalysis) 
+        : batchData.cropAnalysis;
+      
+      // Check if we need a new page
+      if (yPosition > pageHeight - 80) {
+        pdf.addPage();
+        yPosition = 20;
+      }
+      
+      pdf.setFontSize(12);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('Crop Quality Analysis Based on Soil Data', 20, yPosition);
+      yPosition += 10;
+      
+      pdf.setFontSize(10);
+      pdf.setFont('helvetica', 'normal');
+      
+      // Quality Assessment - Display as 5 concise lines
+      if (analysis.qualityAssessment) {
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('Quality Assessment:', 20, yPosition);
+        yPosition += 7;
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(10);
+        
+        // Split quality assessment into lines (max 5 lines)
+        const qualityText = analysis.qualityAssessment;
+        // Split by newlines or periods, then take first 5 meaningful lines
+        const lines = qualityText.split(/\n|\. /).filter(line => line.trim().length > 0).slice(0, 5);
+        
+        lines.forEach((line: string, index: number) => {
+          if (yPosition > pageHeight - 20) {
+            pdf.addPage();
+            yPosition = 20;
+          }
+          // Clean up line and add numbering
+          const cleanLine = line.trim().replace(/^[0-9]+[\.\)]\s*/, ''); // Remove numbering if present
+          const formattedLine = cleanLine.endsWith('.') ? cleanLine : cleanLine + '.';
+          pdf.text(`${index + 1}. ${formattedLine}`, 25, yPosition);
+          yPosition += 7;
+        });
+        yPosition += 5;
+      }
+      
+      // Quality Score and Category
+      if (analysis.qualityScore !== undefined) {
+        if (yPosition > pageHeight - 30) {
+          pdf.addPage();
+          yPosition = 20;
+        }
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(`Quality Score: ${analysis.qualityScore}/100`, 20, yPosition);
+        yPosition += 7;
+        if (analysis.cropQuality) {
+          pdf.text(`Quality Category: ${analysis.cropQuality}`, 20, yPosition);
+          yPosition += 7;
+        }
+        if (analysis.expectedYield) {
+          pdf.text(`Expected Yield: ${analysis.expectedYield}`, 20, yPosition);
+          yPosition += 7;
+        }
+        yPosition += 5;
+      }
+      
+      // Recommendations
+      if (analysis.recommendations && analysis.recommendations.length > 0) {
+        if (yPosition > pageHeight - 40) {
+          pdf.addPage();
+          yPosition = 20;
+        }
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('Recommendations:', 20, yPosition);
+        yPosition += 7;
+        pdf.setFont('helvetica', 'normal');
+        analysis.recommendations.forEach((rec: string) => {
+          if (yPosition > pageHeight - 20) {
+            pdf.addPage();
+            yPosition = 20;
+          }
+          pdf.text(`• ${rec}`, 25, yPosition);
+          yPosition += 6;
+        });
+        yPosition += 5;
+      }
+      
+      // Soil Recommendations
+      if (analysis.soilRecommendations && analysis.soilRecommendations.length > 0) {
+        if (yPosition > pageHeight - 40) {
+          pdf.addPage();
+          yPosition = 20;
+        }
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('Soil Recommendations:', 20, yPosition);
+        yPosition += 7;
+        pdf.setFont('helvetica', 'normal');
+        analysis.soilRecommendations.forEach((rec: string) => {
+          if (yPosition > pageHeight - 20) {
+            pdf.addPage();
+            yPosition = 20;
+          }
+          pdf.text(`• ${rec}`, 25, yPosition);
+          yPosition += 6;
+        });
+        yPosition += 5;
+      }
+      
+      // Overall Assessment
+      if (analysis.overallAssessment) {
+        if (yPosition > pageHeight - 50) {
+          pdf.addPage();
+          yPosition = 20;
+        }
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('Overall Assessment:', 20, yPosition);
+        yPosition += 7;
+        pdf.setFont('helvetica', 'normal');
+        const assessmentLines = pdf.splitTextToSize(analysis.overallAssessment, pageWidth - 40);
+        assessmentLines.forEach((line: string) => {
+          if (yPosition > pageHeight - 20) {
+            pdf.addPage();
+            yPosition = 20;
+          }
+          pdf.text(line, 20, yPosition);
+          yPosition += 6;
+        });
+      }
+    }
+    
+    // Footer
+    const finalY = pageHeight - 20;
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'italic');
+    pdf.text(`Group ID: ${groupId}`, 20, finalY);
+    pdf.text(`Generated: ${new Date().toISOString()}`, pageWidth - 20, finalY, { align: 'right' });
     
     return pdf.output('blob');
   }
@@ -588,11 +1005,14 @@ export class SingleStepGroupManager {
         file_name: fileName,
         ipfs_hash: ipfsHash,
         file_size: fileSize,
-        transaction_type: metadata?.keyvalues?.transactionType || 'UNKNOWN',
-        batch_id: metadata?.keyvalues?.batchId || null,
+        transaction_type: metadata?.keyvalues?.transactionType || metadata?.keyvalues?.transaction_type || 'UNKNOWN',
+        batch_id: metadata?.keyvalues?.batchId || metadata?.keyvalues?.batch_id || null,
         metadata: JSON.stringify(metadata),
         created_at: new Date().toISOString()
       };
+      
+      console.log('🔍 Storing file reference with transaction_type:', fileData.transaction_type);
+      console.log('🔍 File data:', { group_id: fileData.group_id, file_name: fileData.file_name, transaction_type: fileData.transaction_type });
 
       const { error } = await supabase
         .from('group_files')

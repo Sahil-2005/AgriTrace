@@ -69,9 +69,12 @@ export const Marketplace = () => {
       setLoading(true);
       
       // Use marketplace table (the main one you want to use)
+      // Filter by status='available' and quantity > 0 at database level
       const { data: marketplaceData, error: marketplaceError } = await supabase
         .from('marketplace')
         .select('*')
+        .eq('status', 'available')
+        .gt('quantity', 0) // Only get items with quantity > 0
         .order('created_at', { ascending: false })
         .limit(20);
 
@@ -217,7 +220,8 @@ export const Marketplace = () => {
         if (farmerProfile) {
           filteredData = data?.filter(item => 
             item.current_seller_id === farmerProfile.id && 
-            item.status === 'available'
+            item.status === 'available' &&
+            (item.quantity > 0 || item.quantity === null) // Also check quantity > 0
           ) || [];
           console.log(`Found ${filteredData.length} farmer batches for farmer:`, filteredData);
         } else {
@@ -240,21 +244,26 @@ export const Marketplace = () => {
         
         filteredData = data?.filter(item => 
           (item.current_seller_type === 'farmer' || item.current_seller_type === 'retailer') && 
-          item.status === 'available'
+          item.status === 'available' &&
+          (item.quantity > 0 || item.quantity === null) // Also check quantity > 0
         ) || [];
         console.log(`Found ${filteredData.length} batches available for distributor:`, filteredData);
         
         // If no items found, show all available items for debugging
         if (filteredData.length === 0) {
           console.log('🔍 DEBUG: No farmer/retailer items found, showing all available items for debugging');
-          filteredData = data?.filter(item => item.status === 'available') || [];
+          filteredData = data?.filter(item => 
+            item.status === 'available' &&
+            (item.quantity > 0 || item.quantity === null) // Also check quantity > 0
+          ) || [];
           console.log(`Found ${filteredData.length} total available items:`, filteredData);
         }
       } else if (userType === 'retailer') {
         // Retailers see products from distributors and farmers that are available
         filteredData = data?.filter(item => 
           (item.current_seller_type === 'distributor' || item.current_seller_type === 'farmer') && 
-          item.status === 'available'
+          item.status === 'available' &&
+          (item.quantity > 0 || item.quantity === null) // Also check quantity > 0
         ) || [];
         console.log(`Found ${filteredData.length} batches available for retailer:`, filteredData);
       }
@@ -262,7 +271,10 @@ export const Marketplace = () => {
       // Final fallback: if no items found with specific filtering, show all available items
       if (filteredData.length === 0 && data && data.length > 0) {
         console.log('🔍 DEBUG: No items found with specific filtering, showing all available items as fallback');
-        filteredData = data.filter(item => item.status === 'available');
+        filteredData = data.filter(item => 
+          item.status === 'available' &&
+          (item.quantity > 0 || item.quantity === null) // Also check quantity > 0
+        );
         console.log(`🔍 DEBUG: Fallback - showing ${filteredData.length} available items:`, filteredData);
       }
       

@@ -27,6 +27,7 @@ interface MarketPriceDisplayProps {
   cropType: string;
   variety?: string;
   state?: string;
+  district?: string;
   onPriceSelect?: (price: number) => void;
   className?: string;
 }
@@ -35,6 +36,7 @@ export const MarketPriceDisplay: React.FC<MarketPriceDisplayProps> = ({
   cropType,
   variety,
   state,
+  district,
   onPriceSelect,
   className = ''
 }) => {
@@ -49,14 +51,19 @@ export const MarketPriceDisplay: React.FC<MarketPriceDisplayProps> = ({
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const { toast } = useToast();
 
-  const fetchPrices = async () => {
-    if (!cropType) return;
+  const fetchPrices = React.useCallback(async () => {
+    if (!cropType || !state || !district) {
+      setError('Please select crop type, state, and district to fetch prices');
+      return;
+    }
     
     setLoading(true);
     setError(null);
     
     try {
-      const data = await getPriceSuggestions(cropType, variety, state);
+      console.log('🔄 Fetching mandi prices for:', { cropType, variety, state, district });
+      const data = await getPriceSuggestions(cropType, variety, state, district);
+      console.log('✅ Mandi price data received:', data);
       setPriceData(data);
       setLastUpdated(new Date());
       
@@ -73,6 +80,7 @@ export const MarketPriceDisplay: React.FC<MarketPriceDisplayProps> = ({
         });
       }
     } catch (err) {
+      console.error('❌ Error fetching mandi prices:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch market prices';
       setError(errorMessage);
       toast({
@@ -83,11 +91,14 @@ export const MarketPriceDisplay: React.FC<MarketPriceDisplayProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [cropType, variety, state, district, toast]);
 
   useEffect(() => {
+    // Fetch immediately when component mounts or dependencies change
+    if (cropType && state && district) {
     fetchPrices();
-  }, [cropType, variety, state]);
+    }
+  }, [cropType, variety, state, district, fetchPrices]);
 
   const handlePriceSelect = (price: number) => {
     if (onPriceSelect) {
@@ -180,86 +191,186 @@ export const MarketPriceDisplay: React.FC<MarketPriceDisplayProps> = ({
     );
   }
 
+  // Get modal price from suggestions if available
+  const modalPrice = priceData.suggestions.length > 0 
+    ? priceData.suggestions[0].modal_price 
+    : priceData.averagePrice;
+
   return (
-    <Card className={className}>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <DollarSign className="h-5 w-5" />
-              Market Prices
+    <Card className={`${className} border border-gray-300 shadow-md overflow-hidden`}>
+      <CardHeader className="bg-gray-50 border-b border-gray-300 px-4 py-3 sm:px-6 sm:py-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <CardTitle className="flex items-start sm:items-center gap-2 sm:gap-3 text-base sm:text-lg">
+              <div className="p-1.5 bg-white rounded border border-gray-300 flex-shrink-0">
+                <DollarSign className="h-4 w-4 sm:h-5 sm:w-5 text-gray-700" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-gray-900 truncate">Mandi Price Information</div>
+                <CardDescription className="text-xs text-gray-600 mt-0.5 break-words">
+                  <span className="truncate block">{cropType}{variety ? ` - ${variety}` : ''}</span>
+                  <span className="text-gray-500"> | {state}, {district}</span>
+                </CardDescription>
+              </div>
             </CardTitle>
-            <CardDescription>
-              Current market prices for {cropType}{variety ? ` (${variety})` : ''}
-            </CardDescription>
           </div>
           <Button 
             onClick={fetchPrices} 
             variant="outline" 
             size="sm"
             disabled={loading}
+            className="border-gray-300 hover:bg-gray-100 flex-shrink-0 self-start sm:self-auto"
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="h-4 w-4" />
+              <>
+                <RefreshCw className="h-4 w-4 mr-1.5" />
+                <span className="hidden sm:inline">Refresh</span>
+              </>
             )}
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Price Summary */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="text-center p-3 bg-green-50 rounded-lg">
-            <div className="text-2xl font-bold text-green-600">
+      <CardContent className="p-4 sm:p-6 space-y-4 sm:space-y-6 bg-white">
+        {/* Main Price Display - Always show Min, Modal, and Max */}
+        <div className="space-y-4">
+          <div className="text-center">
+            <h3 className="text-xs sm:text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3 sm:mb-4">Market Price Range</h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            {/* Minimum Price */}
+            <div className="text-center p-4 sm:p-5 bg-gray-50 rounded-lg border border-gray-300 min-w-0">
+              <div className="flex items-center justify-center gap-1.5 mb-2 sm:mb-3">
+                <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4 text-gray-600 flex-shrink-0" />
+                <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap">Minimum</span>
+              </div>
+              <div className="text-xl sm:text-2xl font-bold text-gray-900 mb-1 break-words">
               {formatPrice(priceData.minPrice)}
+              </div>
+              <div className="text-xs text-gray-500 whitespace-nowrap">Per Quintal</div>
             </div>
-            <div className="text-sm text-green-600">Min Price</div>
+            
+            {/* Modal Price */}
+            <div className="text-center p-4 sm:p-5 bg-white rounded-lg border-2 border-gray-400 shadow-sm min-w-0">
+              <div className="flex items-center justify-center gap-1.5 mb-2 sm:mb-3">
+                <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 text-gray-700 flex-shrink-0" />
+                <span className="text-xs font-semibold text-gray-900 uppercase tracking-wide whitespace-nowrap">Modal Price</span>
+              </div>
+              <div className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1 break-words">
+                {formatPrice(modalPrice)}
           </div>
-          <div className="text-center p-3 bg-blue-50 rounded-lg">
-            <div className="text-2xl font-bold text-blue-600">
-              {formatPrice(priceData.averagePrice)}
+              <div className="text-xs text-gray-600 font-medium whitespace-nowrap">Per Quintal</div>
             </div>
-            <div className="text-sm text-blue-600">Average</div>
+            
+            {/* Maximum Price */}
+            <div className="text-center p-4 sm:p-5 bg-gray-50 rounded-lg border border-gray-300 min-w-0">
+              <div className="flex items-center justify-center gap-1.5 mb-2 sm:mb-3">
+                <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4 text-gray-600 flex-shrink-0" />
+                <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap">Maximum</span>
           </div>
-          <div className="text-center p-3 bg-orange-50 rounded-lg">
-            <div className="text-2xl font-bold text-orange-600">
+              <div className="text-xl sm:text-2xl font-bold text-gray-900 mb-1 break-words">
               {formatPrice(priceData.maxPrice)}
+              </div>
+              <div className="text-xs text-gray-500 whitespace-nowrap">Per Quintal</div>
             </div>
-            <div className="text-sm text-orange-600">Max Price</div>
+          </div>
+          
+          {/* Price Range Summary */}
+          <div className="text-center pt-3 border-t border-gray-200">
+            <p className="text-xs sm:text-sm text-gray-700 break-words px-2">
+              <span className="font-semibold">Price Range:</span> {formatPrice(priceData.minPrice)} - {formatPrice(priceData.maxPrice)} 
+              <span className="text-gray-500"> (Modal: {formatPrice(modalPrice)})</span>
+            </p>
           </div>
         </div>
 
-        {/* Price Range */}
-        <div className="text-center">
-          <p className="text-sm text-gray-600">
-            {getPriceRangeText(priceData.minPrice, priceData.maxPrice, priceData.averagePrice)}
-          </p>
+        {/* Market Details Card */}
+        {priceData.suggestions.length > 0 && (
+          <div className="bg-gray-50 rounded-lg border border-gray-300 p-4 sm:p-5">
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
+              <h4 className="font-semibold text-sm sm:text-base text-gray-900 flex items-center gap-2">
+                <MapPin className="h-3 w-3 sm:h-4 sm:w-4 text-gray-700 flex-shrink-0" />
+                <span>Market Information</span>
+              </h4>
+            </div>
+            <div className="space-y-3">
+              {priceData.suggestions.slice(0, 3).map((suggestion, index) => (
+                <div 
+                  key={index} 
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 bg-white rounded-lg border border-gray-300 hover:border-gray-400 transition-colors"
+                >
+                  <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                    <div className="p-2 bg-gray-100 rounded border border-gray-300 flex-shrink-0">
+                      <MapPin className="h-3 w-3 sm:h-4 sm:w-4 text-gray-700" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-sm sm:text-base text-gray-900 truncate">{suggestion.market}</div>
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <Badge variant="outline" className="text-xs border-gray-400 text-gray-700 bg-gray-50 max-w-full truncate">
+                          <span className="truncate block">{suggestion.district}</span>
+                        </Badge>
+                        <Badge variant="outline" className="text-xs border-gray-400 text-gray-700 bg-gray-50 max-w-full truncate">
+                          <span className="truncate block">{suggestion.state}</span>
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 flex-shrink-0">
+                    <div className="text-right">
+                      <div className="text-base sm:text-lg font-bold text-gray-900 whitespace-nowrap">
+                        {formatPrice(suggestion.modal_price)}
+                      </div>
+                      <div className="text-xs text-gray-600 whitespace-nowrap">
+                        Modal Price
+                      </div>
+                    </div>
+                    {onPriceSelect && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePriceSelect(suggestion.modal_price)}
+                        className="border-gray-400 text-gray-700 hover:bg-gray-100 hover:border-gray-500 flex-shrink-0"
+                      >
+                        Use
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
         </div>
+        )}
 
         {/* Quick Price Selection */}
         {onPriceSelect && (
-          <div className="space-y-2">
-            <h4 className="font-medium text-sm">Quick Select Price:</h4>
-            <div className="flex gap-2 flex-wrap">
+          <div className="bg-gray-50 rounded-lg border border-gray-300 p-4">
+            <h4 className="font-semibold text-sm sm:text-base text-gray-900 mb-3 flex items-center gap-2">
+              <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 text-gray-700 flex-shrink-0" />
+              <span>Quick Select Price</span>
+            </h4>
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 flex-wrap">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => handlePriceSelect(priceData.minPrice)}
+                className="border-gray-400 text-gray-700 hover:bg-gray-100 w-full sm:w-auto justify-center"
               >
                 Min: {formatPrice(priceData.minPrice)}
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handlePriceSelect(priceData.averagePrice)}
+                onClick={() => handlePriceSelect(modalPrice)}
+                className="border-gray-600 text-gray-900 hover:bg-gray-200 font-semibold w-full sm:w-auto justify-center"
               >
-                Avg: {formatPrice(priceData.averagePrice)}
+                Modal: {formatPrice(modalPrice)}
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => handlePriceSelect(priceData.maxPrice)}
+                className="border-gray-400 text-gray-700 hover:bg-gray-100 w-full sm:w-auto justify-center"
               >
                 Max: {formatPrice(priceData.maxPrice)}
               </Button>
@@ -267,54 +378,23 @@ export const MarketPriceDisplay: React.FC<MarketPriceDisplayProps> = ({
           </div>
         )}
 
-        {/* Market Details */}
-        <div className="space-y-2">
-          <h4 className="font-medium text-sm">Recent Market Data:</h4>
-          <div className="space-y-2 max-h-40 overflow-y-auto">
-            {priceData.suggestions.slice(0, 5).map((suggestion, index) => (
-              <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded text-sm">
-                <div className="flex items-center gap-2">
-                  <MapPin className="h-3 w-3 text-gray-500" />
-                  <span className="font-medium">{suggestion.market}</span>
-                  <Badge variant="outline" className="text-xs">
-                    {suggestion.state}
-                  </Badge>
+        {/* Footer Information */}
+        <div className="pt-3 sm:pt-4 border-t border-gray-200 space-y-2">
+          {lastUpdated && (
+            <div className="flex items-center justify-center gap-2 text-xs text-gray-500 flex-wrap px-2">
+              <Calendar className="h-3 w-3 flex-shrink-0" />
+              <span className="text-center">Last updated: {lastUpdated.toLocaleString('en-IN', { 
+                day: '2-digit', 
+                month: '2-digit', 
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold">{formatPrice(suggestion.modal_price)}</span>
-                  {onPriceSelect && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handlePriceSelect(suggestion.modal_price)}
-                      className="h-6 px-2 text-xs"
-                    >
-                      Use
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Last Updated */}
-        {lastUpdated && (
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <Calendar className="h-3 w-3" />
-            <span>Last updated: {lastUpdated.toLocaleString()}</span>
-          </div>
-        )}
-
-        {/* Data Source */}
-        <div className="text-xs text-gray-500 text-center">
-          {priceData.suggestions.length > 0 && priceData.suggestions[0].state === 'Odisha' && 
-           priceData.suggestions[0].market === 'Bhubaneswar' ? (
-            <span className="text-amber-600">
-            </span>
-          ) : (
-            <span>Data source: Government of India - Ministry of Agriculture and Farmers Welfare</span>
           )}
+          <div className="text-xs text-gray-500 text-center px-2 break-words">
+            <span className="font-medium">Data Source:</span> Government of India - Ministry of Agriculture and Farmers Welfare
+          </div>
         </div>
       </CardContent>
     </Card>

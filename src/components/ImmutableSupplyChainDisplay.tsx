@@ -7,6 +7,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { transactionManager } from '@/utils/transactionManager';
 import { immutableCertificateGenerator } from '@/utils/immutableCertificateGenerator';
 import { TransactionChain, SupplyChainTransaction } from '@/types/transaction';
+import { supabase } from '@/integrations/supabase/client';
 import { 
   Download, 
   Users, 
@@ -16,7 +17,8 @@ import {
   DollarSign,
   CheckCircle,
   AlertCircle,
-  Loader2
+  Loader2,
+  ExternalLink
 } from 'lucide-react';
 
 interface ImmutableSupplyChainDisplayProps {
@@ -27,13 +29,104 @@ export const ImmutableSupplyChainDisplay: React.FC<ImmutableSupplyChainDisplayPr
   const [chain, setChain] = useState<TransactionChain | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [batchCurrentOwner, setBatchCurrentOwner] = useState<string | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
     const loadTransactionChain = async () => {
       try {
         setLoading(true);
+        
+        // Also fetch batch to get current_owner as fallback
+        let currentOwnerName: string | null = null;
+        try {
+          const { data: batch } = await (supabase as any)
+            .from('batches')
+            .select('current_owner, profiles:current_owner(full_name, user_type)')
+            .eq('id', batchId)
+            .single();
+          
+          if (batch?.profiles?.full_name) {
+            let ownerName = batch.profiles.full_name;
+            // Format: "UserType - Name" but avoid duplicates
+            if (batch.profiles.user_type) {
+              const userTypePrefix = batch.profiles.user_type.charAt(0).toUpperCase() + batch.profiles.user_type.slice(1);
+              const nameLower = ownerName.toLowerCase();
+              const typeLower = batch.profiles.user_type.toLowerCase();
+              const prefixLower = `${typeLower} - `;
+              
+              // Check if name already has the prefix (with or without capitalization)
+              if (!nameLower.startsWith(prefixLower) && !nameLower.startsWith(typeLower + ' - ')) {
+                ownerName = `${userTypePrefix} - ${ownerName}`;
+              }
+            }
+            currentOwnerName = ownerName.trim();
+            setBatchCurrentOwner(currentOwnerName);
+          }
+        } catch (batchError) {
+          console.warn('Could not fetch batch for current owner:', batchError);
+        }
+        
         const transactionChain = await transactionManager.getTransactionChain(batchId);
+        
+        // ALWAYS use batch's current_owner as source of truth, not transaction calculations
+        // This ensures ownership is correct even if transactions are missing or incorrect
+        if (currentOwnerName) {
+          // Get the total quantity from batch or transaction chain
+          const totalQty = transactionChain.totalQuantity || 0;
+          
+          // Replace currentOwners with the actual current owner from database
+          transactionChain.currentOwners = {
+            [currentOwnerName]: {
+              quantity: totalQty,
+              lastTransaction: 'current'
+            }
+          };
+          
+          console.log('🔍 DEBUG: Using batch current_owner as source of truth:', {
+            currentOwnerName,
+            totalQty,
+            batchId
+          });
+        } else if (Object.keys(transactionChain.currentOwners).length === 0) {
+          // Fallback: if no current owner found, try to get from batch directly
+          try {
+            const { data: batchData } = await (supabase as any)
+              .from('batches')
+              .select('current_owner, harvest_quantity, profiles:current_owner(full_name, user_type)')
+              .eq('id', batchId)
+              .single();
+            
+            if (batchData?.current_owner && batchData?.profiles?.full_name) {
+              let ownerName = batchData.profiles.full_name;
+              // Format: "UserType - Name" but avoid duplicates
+              if (batchData.profiles.user_type) {
+                const userTypePrefix = batchData.profiles.user_type.charAt(0).toUpperCase() + batchData.profiles.user_type.slice(1);
+                const nameLower = ownerName.toLowerCase();
+                const typeLower = batchData.profiles.user_type.toLowerCase();
+                const prefixLower = `${typeLower} - `;
+                
+                // Check if name already has the prefix (with or without capitalization)
+                if (!nameLower.startsWith(prefixLower) && !nameLower.startsWith(typeLower + ' - ')) {
+                  ownerName = `${userTypePrefix} - ${ownerName}`;
+                }
+              }
+              const finalOwnerName = ownerName.trim();
+              
+              transactionChain.currentOwners = {
+                [finalOwnerName]: {
+                  quantity: batchData.harvest_quantity || transactionChain.totalQuantity || 0,
+                  lastTransaction: 'current'
+                }
+              };
+              
+              console.log('🔍 DEBUG: Fallback - using batch current_owner:', finalOwnerName);
+            }
+          } catch (fallbackError) {
+            console.warn('Could not fetch batch for fallback ownership:', fallbackError);
+          }
+        }
+        
         setChain(transactionChain);
       } catch (error) {
         console.error('Error loading transaction chain:', error);
@@ -274,9 +367,26 @@ export const ImmutableSupplyChainDisplay: React.FC<ImmutableSupplyChainDisplayPr
                     <div className="text-xs text-gray-500">
                       Transaction ID: {transaction.transactionId}
                     </div>
-                    <div className="text-xs text-gray-500">
-                      IPFS Hash: {transaction.ipfsHash.substring(0, 20)}...
-                    </div>
+                    {transaction.ipfsHash && (
+                      <div className="text-xs text-gray-500">
+                        IPFS Hash: {transaction.ipfsHash.substring(0, 20)}...
+                      </div>
+                    )}
+                    {transaction.ipfsHash && (
+                      <div className="mt-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            window.open(`https://tan-keen-fox-160.gateway.pinata.cloud/ipfs/${transaction.ipfsHash}`, '_blank');
+                          }}
+                          className="text-xs"
+                        >
+                          <ExternalLink className="h-3 w-3 mr-1" />
+                          View Certificate
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Menu, X, Leaf, User, ShoppingCart, Shield, LogIn, LogOut, Wallet } from 'lucide-react';
+import { Menu, X, Leaf, User, ShoppingCart, Shield, LogIn, LogOut, Wallet, Camera } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWeb3 } from '@/contexts/Web3Context';
 import {
@@ -156,6 +156,12 @@ export const Header = () => {
                   <Link to="/profile">
                     <User className="mr-2 h-4 w-4" />
                     Profile
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/crop-health">
+                    <Camera className="mr-2 h-4 w-4" />
+                    Crop Health Detection
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>

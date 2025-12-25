@@ -21,12 +21,14 @@ import { RetailerMarketplace } from "./pages/RetailerMarketplace";
 import { RetailerInventory } from "./pages/RetailerInventory";
 import { TrackProducts } from "./pages/TrackProducts";
 import { Profile } from "./pages/Profile";
+import { CropHealthDetection } from "./pages/CropHealthDetection";
 import { BatchRegistration } from "./pages/BatchRegistration";
 import { Admin } from "./pages/Admin";
 import { Unauthorized } from "./pages/Unauthorized";
 import { TestPage } from "./pages/TestPage";
 import { UnifiedVerificationSystem } from "./components/UnifiedVerificationSystem";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import HelperDesk from "./pages/HelperDesk";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
@@ -100,17 +102,30 @@ const App = () => (
                     </ProtectedRoute>
                   } />
                   
+                  <Route path="/crop-health" element={
+                    <ProtectedRoute allowedUserTypes={['farmer', 'distributor']}>
+                      <CropHealthDetection />
+                    </ProtectedRoute>
+                  } />
+                  
                   <Route path="/batch-registration" element={
-                    <ProtectedRoute allowedUserTypes={['farmer']}>
+                    <ProtectedRoute allowedUserTypes={['farmer', 'distributor']}>
                       <BatchRegistration />
                     </ProtectedRoute>
                   } />
                   
                   <Route path="/verification" element={<UnifiedVerificationSystem />} />
+                  <Route path="/verify" element={<UnifiedVerificationSystem />} />
                   
                   <Route path="/admin" element={
                     <ProtectedRoute allowedUserTypes={['admin']}>
                       <Admin />
+                    </ProtectedRoute>
+                  } />
+                  
+                  <Route path="/helper-desk" element={
+                    <ProtectedRoute allowedUserTypes={['helper', 'admin']}>
+                      <HelperDesk />
                     </ProtectedRoute>
                   } />
                   

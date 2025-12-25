@@ -1,6 +1,6 @@
 /**
- * Government API integration for current agricultural commodity prices
- * API: https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070
+ * Mandi Price API integration for current agricultural commodity prices
+ * API: https://agriinfoextractor.onrender.com/api/mandi/price
  */
 
 export interface MarketPriceData {
@@ -8,12 +8,23 @@ export interface MarketPriceData {
   district: string;
   market: string;
   commodity: string;
-  variety: string;
-  grade: string;
+  variety?: string;
+  grade?: string;
   min_price: number;
   max_price: number;
   modal_price: number;
   price_date: string;
+}
+
+export interface MandiPriceAPIResponse {
+  state: string;
+  district: string;
+  market: string;
+  commodity: string;
+  modalPrice: number;
+  minPrice: number;
+  maxPrice: number;
+  date: string;
 }
 
 export interface MarketPriceResponse {
@@ -24,11 +35,30 @@ export interface MarketPriceResponse {
   offset: number;
 }
 
-const API_KEY = '579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b';
-const BASE_URL = 'https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070';
+const BASE_URL = 'https://agriinfoextractor.onrender.com/api/mandi/price';
 
 /**
- * Fetch current market prices for agricultural commodities
+ * Map crop types to commodity names for the API
+ */
+function mapCropTypeToCommodity(cropType: string): string {
+  const commodityMap: Record<string, string> = {
+    'Rice': 'Rice',
+    'Wheat': 'Wheat',
+    'Maize': 'Maize',
+    'Turmeric': 'Turmeric',
+    'Black Gram': 'Black Gram',
+    'Green Chili': 'Green Chili',
+    'Coconut': 'Coconut',
+    'Onion': 'Onion',
+    'Tomato': 'Tomato',
+    'Potato': 'Potato',
+  };
+  
+  return commodityMap[cropType] || cropType;
+}
+
+/**
+ * Fetch current market prices for agricultural commodities from Mandi Price API
  */
 export async function fetchMarketPrices(options: {
   commodity?: string;
@@ -41,35 +71,27 @@ export async function fetchMarketPrices(options: {
   offset?: number;
 } = {}): Promise<MarketPriceResponse> {
   try {
+    // Require state, district, and commodity for the new API
+    if (!options.state || !options.district || !options.commodity) {
+      console.warn('⚠️ Missing required parameters: state, district, or commodity');
+      return {
+        records: [],
+        total: 0,
+        count: 0,
+        limit: options.limit || 10,
+        offset: options.offset || 0,
+      };
+    }
+
+    const commodity = mapCropTypeToCommodity(options.commodity);
     const params = new URLSearchParams({
-      'api-key': API_KEY,
-      format: 'json',
-      limit: (options.limit || 10).toString(),
-      offset: (options.offset || 0).toString(),
+      state: options.state,
+      district: options.district,
+      commodity: commodity,
     });
 
-    // Add filters if provided
-    if (options.commodity) {
-      params.append('filters[commodity]', options.commodity);
-    }
-    if (options.variety) {
-      params.append('filters[variety]', options.variety);
-    }
-    if (options.state) {
-      params.append('filters[state.keyword]', options.state);
-    }
-    if (options.district) {
-      params.append('filters[district]', options.district);
-    }
-    if (options.market) {
-      params.append('filters[market]', options.market);
-    }
-    if (options.grade) {
-      params.append('filters[grade]', options.grade);
-    }
-
     const url = `${BASE_URL}?${params.toString()}`;
-    console.log('🔍 Fetching market prices from:', url);
+    console.log('🔍 Fetching mandi prices from:', url);
 
     const response = await fetch(url, {
       method: 'GET',
@@ -83,27 +105,27 @@ export async function fetchMarketPrices(options: {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const data = await response.json();
-    console.log('📊 Market price API response:', data);
+    const data: MandiPriceAPIResponse = await response.json();
+    console.log('📊 Mandi price API response:', data);
 
-    // Check if the API returned an error
-    if (data.status === 'error' || data.message === 'Resource id doesn\'t exist.') {
-      console.warn('⚠️ API returned error:', data.message);
-      return {
-        records: [],
-        total: 0,
-        count: 0,
-        limit: options.limit || 10,
-        offset: options.offset || 0,
+    // Convert API response to MarketPriceData format
+    const marketPriceData: MarketPriceData = {
+      state: data.state,
+      district: data.district,
+      market: data.market,
+      commodity: data.commodity,
+      min_price: data.minPrice,
+      max_price: data.maxPrice,
+      modal_price: data.modalPrice,
+      price_date: data.date,
       };
-    }
 
     return {
-      records: data.records || [],
-      total: data.total || 0,
-      count: data.count || 0,
-      limit: data.limit || 10,
-      offset: data.offset || 0,
+      records: [marketPriceData],
+      total: 1,
+      count: 1,
+      limit: options.limit || 10,
+      offset: options.offset || 0,
     };
   } catch (error) {
     console.error('❌ Error fetching market prices:', error);
@@ -231,7 +253,8 @@ const FALLBACK_MARKET_DATA: Record<string, MarketPriceData[]> = {
 export async function getPriceSuggestions(
   cropType: string,
   variety?: string,
-  state?: string
+  state?: string,
+  district?: string
 ): Promise<{
   minPrice: number;
   maxPrice: number;
@@ -243,6 +266,7 @@ export async function getPriceSuggestions(
       commodity: cropType,
       variety: variety,
       state: state,
+      district: district,
       limit: 20,
     });
 
@@ -287,10 +311,9 @@ export async function getPriceSuggestions(
       };
     }
 
-    // Calculate price statistics from API data
-    const prices = response.records.map(record => record.modal_price).filter(price => price > 0);
-    
-    if (prices.length === 0) {
+    // Use the actual min_price, max_price, and modal_price from API response
+    // The API already provides these values, so use them directly
+    if (response.records.length === 0) {
       return {
         minPrice: 0,
         maxPrice: 0,
@@ -299,9 +322,18 @@ export async function getPriceSuggestions(
       };
     }
 
-    const minPrice = Math.min(...prices);
-    const maxPrice = Math.max(...prices);
-    const averagePrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
+    // Get the first record (API returns single record)
+    const record = response.records[0];
+    
+    // Use the actual min_price, max_price from the API response
+    const minPrice = record.min_price || 0;
+    const maxPrice = record.max_price || 0;
+    const modalPrice = record.modal_price || 0;
+    
+    // Use modal_price as averagePrice (since API doesn't provide average, modal is the most common price)
+    const averagePrice = modalPrice;
+
+    console.log('📊 Using API prices directly:', { minPrice, maxPrice, modalPrice, averagePrice });
 
     return {
       minPrice: Math.round(minPrice),

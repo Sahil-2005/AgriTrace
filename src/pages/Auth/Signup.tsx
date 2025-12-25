@@ -39,11 +39,15 @@ export const Signup = () => {
     setIsLoading(true);
 
     try {
-      const { error } = await supabase.auth.signUp({
+      console.log('🔍 Attempting signup for:', email);
+      
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           emailRedirectTo: `${window.location.origin}/`,
+          // Disable email confirmation for development (remove in production)
+          // If email confirmation is disabled in Supabase settings, this will work without email
           data: {
             full_name: fullName,
             user_type: selectedRole,
@@ -53,12 +57,14 @@ export const Signup = () => {
       });
 
       if (error) {
+        console.error('❌ Signup error:', error);
         toast({
           variant: "destructive",
           title: "Signup failed",
-          description: error.message,
+          description: error.message || "Error sending confirmation email. Please check your Supabase configuration.",
         });
       } else {
+        console.log('✅ Signup successful:', data);
         toast({
           title: "Account created successfully!",
           description: "Please check your email to verify your account.",
@@ -66,10 +72,12 @@ export const Signup = () => {
         navigate('/login');
       }
     } catch (error) {
+      console.error('❌ Unexpected signup error:', error);
+      const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
       toast({
         variant: "destructive",
         title: "Signup failed",
-        description: "An unexpected error occurred.",
+        description: errorMessage,
       });
     } finally {
       setIsLoading(false);

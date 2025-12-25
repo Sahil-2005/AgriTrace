@@ -30,20 +30,60 @@ interface BatchDetailsModalProps {
 export const BatchDetailsModal: React.FC<BatchDetailsModalProps> = ({ batch, isOpen, onClose, onBuyNow }) => {
   const navigate = useNavigate();
   const [ipfsHash, setIpfsHash] = useState<string | null>(null);
-
-  if (!batch) return null;
+  const [currentOwnerProfile, setCurrentOwnerProfile] = useState<any>(null);
 
   // Handle both old batch structure and new marketplace structure
-  const batchData = batch.batches || batch;
-  const marketplaceData = batch.batches ? batch : null;
+  // Use null-safe access to avoid errors when batch is null
+  const batchData = batch?.batches || batch;
+  const marketplaceData = batch?.batches ? batch : null;
+  
+  // If we have nested batches structure, merge profiles from top level
+  if (batch?.batches && batch?.profiles) {
+    batchData.profiles = batch.profiles;
+  }
+  if (batch?.batches && batch?.farmerProfile) {
+    batchData.farmerProfile = batch.farmerProfile;
+  }
+  
+  // Fetch current owner profile from batch's current_owner field (source of truth)
+  useEffect(() => {
+    const fetchCurrentOwner = async () => {
+      if (!batchData?.current_owner) return;
+      
+      try {
+        const { data: ownerProfile, error } = await (supabase as any)
+          .from('profiles')
+          .select('id, full_name, farm_location, user_type')
+          .eq('id', batchData.current_owner)
+          .single();
+        
+        if (error) {
+          console.warn('Could not fetch current owner profile:', error);
+          return;
+        }
+        
+        if (ownerProfile) {
+          console.log('✅ Fetched current owner profile:', ownerProfile);
+          setCurrentOwnerProfile(ownerProfile);
+        }
+      } catch (error) {
+        console.error('Error fetching current owner:', error);
+      }
+    };
+    
+    fetchCurrentOwner();
+  }, [batchData?.current_owner, batchData?.id]);
 
   // Fetch IPFS hash from group_files table if not available in batch data
   useEffect(() => {
+    // Early return if batch is not available
+    if (!batch || !batchData) return;
+    
     const fetchIpfsHash = async () => {
       if (!batchData.group_id) return;
       
       try {
-        const { data, error } = await supabase
+        const { data, error } = await (supabase as any)
           .from('group_files')
           .select('ipfs_hash')
           .eq('group_id', batchData.group_id)
@@ -72,7 +112,10 @@ export const BatchDetailsModal: React.FC<BatchDetailsModalProps> = ({ batch, isO
       // Use existing IPFS hash from batch data
       setIpfsHash(batchData.ipfs_hash || batchData.ipfs_certificate_hash);
     }
-  }, [batchData.group_id, batchData.ipfs_hash, batchData.ipfs_certificate_hash]);
+  }, [batch, batchData?.group_id, batchData?.ipfs_hash, batchData?.ipfs_certificate_hash]);
+
+  // Early return AFTER all hooks - this is safe now
+  if (!batch || !batchData) return null;
 
   // Debug logging
   console.log('🔍 BatchDetailsModal - Full batch object:', batch);
@@ -206,16 +249,36 @@ export const BatchDetailsModal: React.FC<BatchDetailsModalProps> = ({ batch, isO
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <User className="h-5 w-5" />
-                    Farmer Information
+                    Current Owner Information
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex items-center gap-3">
                     <User className="h-4 w-4 text-muted-foreground" />
                     <div>
-                      <div className="font-medium">Farmer</div>
+                      <div className="font-medium">Current Owner</div>
                       <div className="text-sm text-muted-foreground">
-                        {batchData.profiles?.full_name || 'Not specified'}
+                        {(() => {
+                          // ALWAYS use current_owner from database (source of truth)
+                          const profile = currentOwnerProfile || batchData.profiles || batchData.farmerProfile;
+                          if (!profile?.full_name) return 'Not specified';
+                          
+                          // Format: "UserType - Name" but avoid duplicates
+                          let displayName = profile.full_name;
+                          if (profile.user_type) {
+                            const userTypePrefix = profile.user_type.charAt(0).toUpperCase() + profile.user_type.slice(1);
+                            // Check if name already starts with user type (case-insensitive) to avoid duplication
+                            const nameLower = displayName.toLowerCase();
+                            const typeLower = profile.user_type.toLowerCase();
+                            const prefixLower = `${typeLower} - `;
+                            
+                            // Check if name already has the prefix (with or without capitalization)
+                            if (!nameLower.startsWith(prefixLower) && !nameLower.startsWith(typeLower + ' - ')) {
+                              displayName = `${userTypePrefix} - ${displayName}`;
+                            }
+                          }
+                          return displayName;
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -225,10 +288,20 @@ export const BatchDetailsModal: React.FC<BatchDetailsModalProps> = ({ batch, isO
                     <div>
                       <div className="font-medium">Location</div>
                       <div className="text-sm text-muted-foreground">
-                        {batchData.profiles?.farm_location || 'Not specified'}
+                        {currentOwnerProfile?.farm_location || batchData.profiles?.farm_location || batchData.farmerProfile?.farm_location || 'Not specified'}
                       </div>
                     </div>
                   </div>
+
+                  {/* Show original farmer if different from current owner */}
+                  {batchData.farmerProfile && batchData.profiles?.id !== batchData.farmer_id && (
+                    <div className="pt-2 border-t">
+                      <div className="text-xs text-muted-foreground mb-1">Original Farmer</div>
+                      <div className="text-sm">
+                        {batchData.farmerProfile.full_name || 'Not specified'}
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -424,3 +497,4 @@ export const BatchDetailsModal: React.FC<BatchDetailsModalProps> = ({ batch, isO
     </Dialog>
   );
 };
+
