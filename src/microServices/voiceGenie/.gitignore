@@ -1,0 +1,42 @@
+# Node.js dependencies
+/node_modules/
+
+# Logs
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+*.log
+
+# Environment files
+.env
+.env.* 
+
+# IDE or editor-specific files
+.idea/
+.vscode/
+
+# OS-specific files
+.DS_Store      # macOS
+Thumbs.db      # Windows
+
+# Build directories
+/dist
+/build
+/lib-cov
+
+# Test coverage
+/coverage
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Operating system files
+*.swp         # Linux
+*.swo         # Linux
+
+# Temporary files
+*.tmp
+*.bak

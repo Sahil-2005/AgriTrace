@@ -1,0 +1,41 @@
+# Ignore Python bytecode files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environment folders
+venv/
+myenv/
+env/
+ENV/
+
+# Ignore IDE/editor-specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore model checkpoints (PyTorch, TensorFlow, etc.)
+# models/*.pt
+# models/*.h5
+
+# Ignore Python packages and distribution artifacts
+*.egg-info/
+dist/
+build/
+
+# Ignore logs and temporary files
+*.log
+*.bak
+*.tmp
+
+# Ignore system-specific files
+.DS_Store          # macOS specific
+Thumbs.db          # Windows specific
+
+# Ignore environment configuration files (if you're using specific tools)
+*.env              # For environment variable files like .env (if any)

@@ -1,0 +1,159 @@
+[
+  {
+    "campaignId": "ba6a1c2e-2de4-4628-9448-7179c5079c7d",
+    "duration": "0",
+    "answers": {},
+    "rawPayload": {
+      "transcript": [
+        {
+          "sender": "BOT",
+          "message": "नमस्ते, मैं आपका एग्रोसाथी हूँ। मैं आपसे आपकी फसल के बारे में कुछ सवाल पूछूँगा ताकि हम आपको खरीदारों से जोड़ सकें। इसमें बस कुछ ही मिनट लगेंगे। चलिए शुरू करते हैं?”",
+          "timestamp": "2025-12-20 14:05:15 UTC"
+        },
+        {
+          "sender": "HUMAN",
+          "message": " ठीक है.",
+          "timestamp": "2025-12-20 14:05:31 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "धन्यवाद!",
+          "timestamp": "2025-12-20 14:05:32 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "मैं आपकी फसल के बारे में कुछ जानकारी एकत्रित करूँगी ताकि खरीदारों को सही जानकारी दे सकें।",
+          "timestamp": "2025-12-20 14:05:37 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "सबसे पहले, आप कौन सी फसल बेच रहे हैं?",
+          "timestamp": "2025-12-20 14:05:40 UTC"
+        },
+        {
+          "sender": "HUMAN",
+          "message": " गेहूं.",
+          "timestamp": "2025-12-20 14:05:43 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "धन्यवाद, आपने बताया कि आप गेहूं बेच रहे हैं।",
+          "timestamp": "2025-12-20 14:05:47 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "कृपया बताएं, यह गेहूं किस किस्म का है?",
+          "timestamp": "2025-12-20 14:05:50 UTC"
+        },
+        {
+          "sender": "HUMAN",
+          "message": " साधारण.",
+          "timestamp": "2025-12-20 14:05:52 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "धन्यवाद, आपने बताया कि गेहूं की किस्म साधारण है।",
+          "timestamp": "2025-12-20 14:05:57 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "अब कृपया बताएं, आपने कितनी मात्रा में गेहूं की फसल काटी है?",
+          "timestamp": "2025-12-20 14:06:01 UTC"
+        },
+        {
+          "sender": "HUMAN",
+          "message": " सौ kilo.",
+          "timestamp": "2025-12-20 14:06:04 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "धन्यवाद, आपने बताया कि आपने 100 किलो गेहूं की फसल काटी है।",
+          "timestamp": "2025-12-20 14:06:10 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "कृपया बताएं, आपने यह फसल कब बोई थी?",
+          "timestamp": "2025-12-20 14:06:12 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "(महीना या मौसम भी बता सकते हैं)",
+          "timestamp": "2025-12-20 14:06:15 UTC"
+        },
+        {
+          "sender": "HUMAN",
+          "message": " दो वाली",
+          "timestamp": "2025-12-20 14:06:16 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "माफ़ कीजिए, म-",
+          "timestamp": "2025-12-20 14:06:17 UTC"
+        },
+        {
+          "sender": "HUMAN",
+          "message": " दो हज़ार चौबीस गर्मी में.",
+          "timestamp": "2025-12-20 14:06:18 UTC"
+        },
+        {
+          "sender": "BOT",
+          "message": "धन्यवाद, आपने बताया कि आप-",
+          "timestamp": "2025-12-20 14:06:22 UTC"
+        },
+        {
+          "sender": "HUMAN",
+          "message": " अरे मां तुमको call आ रहे हैं भाई क्या है कितने वह सारे request के अभी आ रहे हैं call.",
+          "timestamp": "2025-12-20 14:06:25 UTC"
+        }
+      ],
+      "customerSpecificData": {
+        "PhoneNumber": "+917666667786",
+        "Email": "",
+        "Name": "",
+        "isVOIP": false,
+        "delayCallOpeningMessage": false
+      },
+      "voiceMailDetected": false,
+      "callSummary": "",
+      "callStatus": "Ended",
+      "callTransfered": "false",
+      "callRecordingUri": "",
+      "smsSent": false,
+      "voipDetected": false,
+      "workspaceId": "68d2a0e817055159cddfa6b9",
+      "campaignId": "ba6a1c2e-2de4-4628-9448-7179c5079c7d",
+      "duration": "0",
+      "informationGathered": {},
+      "answersToQuestion": []
+    },
+    "receivedAt": "2025-12-20T14:06:26.852Z"
+  },
+  {
+    "campaignId": "ba6a1c2e-2de4-4628-9448-7179c5079c7d",
+    "duration": "0",
+    "answers": {},
+    "rawPayload": {
+      "transcript": [],
+      "customerSpecificData": {
+        "PhoneNumber": "+917666667786",
+        "Email": "",
+        "Name": "",
+        "isVOIP": false,
+        "delayCallOpeningMessage": false
+      },
+      "voiceMailDetected": false,
+      "callSummary": "",
+      "callStatus": "No Answer",
+      "callTransfered": "false",
+      "callRecordingUri": "",
+      "smsSent": false,
+      "voipDetected": false,
+      "workspaceId": "68d2a0e817055159cddfa6b9",
+      "campaignId": "ba6a1c2e-2de4-4628-9448-7179c5079c7d",
+      "duration": "0",
+      "informationGathered": {},
+      "answersToQuestion": []
+    },
+    "receivedAt": "2025-12-20T14:06:45.790Z"
+  }
+]
