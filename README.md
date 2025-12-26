@@ -653,16 +653,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-## 📞 Support
-
-For support, email support@agritrace.gov.in or open an issue in the repository.
-
----
-
 <div align="center">
 
-**Built with ❤️ for the farmers of Odisha**
+**Built with ❤️ for the farmers**
 
-[Website](https://agritrace.gov.in) • [Documentation](https://docs.agritrace.gov.in) • [GitHub](https://github.com/kjarir/AgriTrace)
+[GitHub](https://github.com/kjarir/AgriTrace)
 
 </div>
