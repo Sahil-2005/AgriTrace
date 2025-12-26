@@ -56,22 +56,41 @@ export async function extractCropDataFromTranscript(
     const prompt = `You are an agricultural data extraction assistant. Analyze the following phone conversation transcript between a bot and a farmer about crop registration, and extract ONLY the essential structured information required for batch registration.
 
 CRITICAL FIELDS TO EXTRACT (These are REQUIRED for batch registration):
-1. variety: The specific variety of the crop (e.g., "Basmati", "Pusa Basmati 1121", "Lakadong", "HD-3086")
-2. harvestQuantity: The quantity harvested in KILOGRAMS (convert quintals to kg: 1 quintal = 100 kg)
+1. cropType: The MAIN TYPE of crop (MUST be one of: Rice, Wheat, Maize, Turmeric, Black Gram, Green Chili, Coconut, Onion, Potato, Tomato)
+   - This is the PRIMARY category (e.g., "Rice", "Wheat", "Maize")
+   - If farmer says "Basmati", "बासमती", or "Pusa Basmati", cropType = "Rice"
+   - If farmer says "Lakadong", cropType = "Turmeric"
+   - If farmer says "HD-3086" or "HD3086", cropType = "Wheat"
+   - Extract the MAIN crop category, NOT the variety name
+
+2. variety: The SPECIFIC VARIETY name of the crop (e.g., "Basmati", "Pusa Basmati 1121", "Lakadong", "HD-3086", "Pusa-1121")
+   - This is the SPECIFIC variety/subtype within the crop type
+   - Examples: "Basmati" (for Rice), "Lakadong" (for Turmeric), "HD-3086" (for Wheat)
+   - If farmer says "Basmati rice" or "बासमती चावल":
+     * cropType = "Rice"
+     * variety = "Basmati"
+   - If farmer says "Lakadong turmeric" or "लकड़ोंग हल्दी":
+     * cropType = "Turmeric"
+     * variety = "Lakadong"
+   - IMPORTANT: cropType and variety are DIFFERENT fields - cropType is the category, variety is the specific name
+
+3. harvestQuantity: The quantity harvested in KILOGRAMS (convert quintals to kg: 1 quintal = 100 kg)
    - If farmer says "100 quintal" or "100 क्विंटल", convert to 10000 kg
    - If farmer says "300 kilo" or "300 kg", use 300 kg
-3. sowingDate: Date when crop was sown (format: YYYY-MM-DD)
+
+4. sowingDate: Date when crop was sown (format: YYYY-MM-DD)
    - If farmer says "7 January 2024" or "7 जनवरी 2024", convert to "2024-01-07"
    - If only month/year mentioned, use first day of that month
-4. harvestDate: Date when crop was harvested (format: YYYY-MM-DD)
+
+5. harvestDate: Date when crop was harvested (format: YYYY-MM-DD)
    - Extract from conversation or infer from context
-5. pricePerKg: Price per kilogram in Indian Rupees (₹)
+
+6. pricePerKg: Price per kilogram in Indian Rupees (₹)
    - Extract price mentioned, ensure it's per kg (not per quintal)
 
 ADDITIONAL FIELDS (Optional but helpful):
-- cropType: The type of crop (e.g., Rice, Wheat, Maize, Turmeric, Black Gram, Green Chili, Coconut, Onion, Potato, Tomato)
-- certification: Certification type if mentioned
-- grading: Grading if mentioned
+- certification: Certification type if mentioned (e.g., "Organic", "Standard", "Premium")
+- grading: Grading if mentioned (e.g., "A", "B", "Standard", "Premium")
 - farmLocation: Location/farm location if mentioned
 
 Conversation Transcript:
@@ -81,33 +100,58 @@ ${callSummary ? `\nCall Summary: ${callSummary}` : ''}
 
 CRITICAL INSTRUCTIONS:
 1. Extract ONLY information explicitly mentioned in the conversation
-2. For harvestQuantity: ALWAYS convert to kilograms
+2. cropType vs variety - UNDERSTAND THE DIFFERENCE:
+   - cropType = MAIN CATEGORY (Rice, Wheat, Maize, Turmeric, etc.)
+   - variety = SPECIFIC NAME within that category (Basmati, Lakadong, HD-3086, etc.)
+   - If farmer says "Basmati" or "बासमती":
+     * cropType MUST be "Rice" (because Basmati is a type of rice)
+     * variety MUST be "Basmati"
+   - If farmer says "Lakadong":
+     * cropType MUST be "Turmeric" (because Lakadong is a type of turmeric)
+     * variety MUST be "Lakadong"
+   - If farmer says "HD-3086" or "HD3086":
+     * cropType MUST be "Wheat" (because HD-3086 is a wheat variety)
+     * variety MUST be "HD-3086"
+   - ALWAYS extract BOTH cropType AND variety - they are DIFFERENT fields
+   - If only variety is mentioned, INFER the cropType from the variety name
+3. For harvestQuantity: ALWAYS convert to kilograms
    - "100 quintal" or "100 क्विंटल" = 10000 kg
    - "50 quintal" or "50 क्विंटल" = 5000 kg
    - "300 kilo" or "300 kg" = 300 kg
-3. For dates: Convert to YYYY-MM-DD format
+4. For dates: Convert to YYYY-MM-DD format
    - "7 January 2024" = "2024-01-07"
    - "7 जनवरी 2024" = "2024-01-07"
    - If only year mentioned, use current year or reasonable estimate
-4. For variety: Extract the exact variety name mentioned (e.g., "Basmati", "बासमती")
 5. For pricePerKg: Extract price per kilogram, not per quintal
 6. Return ONLY valid JSON format, no additional text or explanation
 7. Use null for fields that are NOT mentioned in the conversation
 8. Set confidence based on how many critical fields were extracted (0.0 to 1.0)
+9. VALIDATION: Before returning, ensure:
+   - cropType is one of: Rice, Wheat, Maize, Turmeric, Black Gram, Green Chili, Coconut, Onion, Potato, Tomato
+   - variety is a non-empty string if cropType is provided
+   - If variety is provided but cropType is missing, infer cropType from variety
 
 Return the extracted data as a JSON object with this exact structure:
 {
-  "variety": "string or null",
+  "cropType": "Rice|Wheat|Maize|Turmeric|Black Gram|Green Chili|Coconut|Onion|Potato|Tomato or null",
+  "variety": "string or null (e.g., Basmati, Lakadong, HD-3086)",
   "harvestQuantity": number or null,
   "sowingDate": "YYYY-MM-DD or null",
   "harvestDate": "YYYY-MM-DD or null",
   "pricePerKg": number or null,
-  "cropType": "string or null",
   "certification": "string or null",
   "grading": "string or null",
   "farmLocation": "string or null",
   "confidence": number between 0 and 1
-}`;
+}
+
+IMPORTANT: 
+- cropType and variety are BOTH REQUIRED if crop information is mentioned
+- cropType is the MAIN category (Rice, Wheat, etc.)
+- variety is the SPECIFIC name (Basmati, Lakadong, etc.)
+- If only variety is mentioned, you MUST infer cropType from it
+- Example: "Basmati" → cropType: "Rice", variety: "Basmati"
+- Example: "Lakadong" → cropType: "Turmeric", variety: "Lakadong"`;
 
     console.log('🤖 Sending transcript to Gemini API for extraction...');
     console.log('📝 Transcript length:', conversationText.length, 'characters');
@@ -369,17 +413,77 @@ function normalizeExtractedData(
     }
   }
 
-  // Normalize variety (especially for Basmati rice)
+  // Normalize variety and ensure cropType is set
   if (normalized.variety) {
-    const varietyLower = normalized.variety.toLowerCase();
-    if (varietyLower.includes('basmati') || varietyLower.includes('बासमती')) {
-      normalized.variety = 'Basmati';
-      if (!normalized.cropType) {
+    const varietyLower = normalized.variety.toLowerCase().trim();
+    
+    // Infer cropType from variety if missing
+    if (!normalized.cropType) {
+      if (varietyLower.includes('basmati') || varietyLower.includes('बासमती') || 
+          varietyLower.includes('pusa') || varietyLower.includes('1121') ||
+          varietyLower.includes('sona') || varietyLower.includes('masuri')) {
         normalized.cropType = 'Rice';
+      } else if (varietyLower.includes('lakadong') || varietyLower.includes('लकड़ोंग')) {
+        normalized.cropType = 'Turmeric';
+      } else if (varietyLower.includes('hd-') || varietyLower.includes('hd') || 
+                  varietyLower.includes('3086') || varietyLower.includes('wheat')) {
+        normalized.cropType = 'Wheat';
+      } else if (varietyLower.includes('maize') || varietyLower.includes('corn')) {
+        normalized.cropType = 'Maize';
+      } else if (varietyLower.includes('onion') || varietyLower.includes('प्याज')) {
+        normalized.cropType = 'Onion';
+      } else if (varietyLower.includes('potato') || varietyLower.includes('आलू')) {
+        normalized.cropType = 'Potato';
+      } else if (varietyLower.includes('tomato') || varietyLower.includes('टमाटर')) {
+        normalized.cropType = 'Tomato';
+      } else if (varietyLower.includes('chili') || varietyLower.includes('मिर्च')) {
+        normalized.cropType = 'Green Chili';
+      } else if (varietyLower.includes('coconut') || varietyLower.includes('नारियल')) {
+        normalized.cropType = 'Coconut';
+      } else if (varietyLower.includes('black gram') || varietyLower.includes('उड़द')) {
+        normalized.cropType = 'Black Gram';
       }
     }
-    // Clean up variety name
-    normalized.variety = normalized.variety.trim();
+    
+    // Normalize variety name
+    if (varietyLower.includes('basmati') || varietyLower.includes('बासमती')) {
+      normalized.variety = 'Basmati';
+    } else if (varietyLower.includes('lakadong') || varietyLower.includes('लकड़ोंग')) {
+      normalized.variety = 'Lakadong';
+    } else if (varietyLower.includes('pusa') && varietyLower.includes('1121')) {
+      normalized.variety = 'Pusa Basmati 1121';
+    } else if (varietyLower.includes('hd-3086') || varietyLower.includes('hd3086')) {
+      normalized.variety = 'HD-3086';
+    } else {
+      // Clean up variety name
+      normalized.variety = normalized.variety.trim();
+    }
+  }
+  
+  // If cropType is set but variety is missing, try to infer from cropType
+  if (normalized.cropType && !normalized.variety) {
+    // Can't infer variety from cropType alone, but ensure cropType is valid
+    const validCrops = [
+      'Rice',
+      'Wheat',
+      'Maize',
+      'Turmeric',
+      'Black Gram',
+      'Green Chili',
+      'Coconut',
+      'Onion',
+      'Potato',
+      'Tomato',
+    ];
+    if (!validCrops.includes(normalized.cropType)) {
+      // Try to match partial
+      const matched = validCrops.find((c) =>
+        normalized.cropType?.toLowerCase().includes(c.toLowerCase())
+      );
+      if (matched) {
+        normalized.cropType = matched;
+      }
+    }
   }
   
   // Ensure harvestQuantity is properly converted from quintals
