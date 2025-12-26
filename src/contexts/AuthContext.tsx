@@ -145,7 +145,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      // Try to sign out from Supabase (may fail if offline)
+      await supabase.auth.signOut();
+    } catch (error) {
+      // Even if network request fails, clear local state
+      console.warn('⚠️ Sign out request failed, clearing local state anyway:', error);
+    } finally {
+      // Always clear local state regardless of network status
+      setUser(null);
+      setSession(null);
+      setProfile(null);
+      console.log('✅ Local auth state cleared');
+    }
   };
 
   const value = {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,15 +18,29 @@ import {
   Shield,
   QrCode,
   CheckCircle,
-  ExternalLink
+  ExternalLink,
+  Upload,
+  Camera,
+  X,
+  AlertCircle,
+  FileCheck,
+  Loader2
 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { downloadPDFCertificate } from '@/utils/certificateGenerator';
+import { ComprehensiveVerificationSystem } from '@/components/ComprehensiveVerificationSystem';
 
 export const TrackProducts = () => {
   const [batchId, setBatchId] = useState('');
   const [batch, setBatch] = useState<any>(null);
+  const [batches, setBatches] = useState<any[]>([]); // For group results
+  const [certificates, setCertificates] = useState<any[]>([]); // Certificates in group
   const [loading, setLoading] = useState(false);
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [verificationResult, setVerificationResult] = useState<any>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [isGroupSearch, setIsGroupSearch] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -34,50 +48,208 @@ export const TrackProducts = () => {
     if (!batchId.trim()) return;
     
     setLoading(true);
+    setBatch(null);
+    setBatches([]);
+    setCertificates([]);
+    setIsGroupSearch(false);
+    
     try {
-      let data = null;
-      let error = null;
+      let searchId = batchId.trim();
+      
+      // First, try to parse as JSON (QR code data)
+      let parsedQR: any = null;
+      try {
+        parsedQR = JSON.parse(searchId);
+        if (parsedQR.batchId || parsedQR.id || parsedQR.groupId || parsedQR.group_id) {
+          searchId = parsedQR.batchId || parsedQR.id || parsedQR.groupId || parsedQR.group_id;
+          console.log('✅ Parsed QR code data, extracted ID:', searchId);
+        }
+      } catch (e) {
+        // Not JSON, continue with original searchId
+      }
 
-      // Check if batchId is a number (integer ID)
-      if (!isNaN(Number(batchId))) {
-        console.log('Searching by integer ID:', batchId);
-        const result = await (supabase as any)
+      // Check if it's a group_id (UUID format or starts with specific pattern)
+      // Check if it's a group_id (UUID format: 8-4-4-4-12 characters with dashes)
+      const isGroupId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchId);
+      
+      if (isGroupId) {
+        // Search by group_id - fetch ALL batches in this group
+        console.log('🔍 Searching by Group ID:', searchId);
+        setIsGroupSearch(true);
+        
+        const { data: groupBatches, error: groupError } = await supabase
           .from('batches')
           .select('*')
-          .eq('id', parseInt(batchId))
-          .single();
-        data = result.data;
-        error = result.error;
+          .eq('group_id', searchId);
+        
+        if (groupError) {
+          throw new Error(`Error fetching group: ${groupError.message}`);
+        }
+        
+        if (!groupBatches || groupBatches.length === 0) {
+          throw new Error('No batches found for this Group ID');
+        }
+        
+        setBatches(groupBatches);
+        setBatch(groupBatches[0]); // Set first batch as primary
+        
+        // Fetch all certificates for this group
+        await fetchGroupCertificates(searchId);
+        
+        toast({
+          title: "Group Found",
+          description: `Found ${groupBatches.length} batch(es) in this group.`,
+        });
       } else {
-        // Try searching by blockchain_id or blockchain_batch_id
-        console.log('Searching by blockchain ID:', batchId);
-        const result = await (supabase as any)
-          .from('batches')
-          .select('*')
-          .or(`blockchain_id.eq.${batchId},blockchain_batch_id.eq.${batchId}`)
-          .single();
-        data = result.data;
-        error = result.error;
+        // Try multiple search methods
+        let batchData = null;
+        
+        // First, try by UUID batch ID (most common from QR codes)
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchId);
+        if (isUUID) {
+          console.log('🔍 Trying UUID batch ID:', searchId);
+          const { data, error } = await supabase
+            .from('batches')
+            .select('*')
+            .eq('id', searchId)
+            .limit(1);
+          
+          if (!error && data && data.length > 0) {
+            batchData = data[0];
+            console.log('✅ Found batch by UUID:', batchData.id);
+          }
+        }
+        
+        // Try by integer ID (if it's a number)
+        if (!batchData && !isNaN(Number(searchId)) && Number(searchId) > 0) {
+          console.log('🔍 Trying integer batch ID:', searchId);
+          const { data, error } = await supabase
+            .from('batches')
+            .select('*')
+            .eq('id', parseInt(searchId))
+            .limit(1);
+          
+          if (!error && data && data.length > 0) {
+            batchData = data[0];
+            console.log('✅ Found batch by integer ID:', batchData.id);
+          }
+        }
+        
+        // Try by blockchain IDs
+        if (!batchData) {
+          console.log('🔍 Trying blockchain IDs:', searchId);
+          const { data, error } = await supabase
+            .from('batches')
+            .select('*')
+            .or(`blockchain_id.eq.${searchId},blockchain_batch_id.eq.${searchId}`)
+            .limit(1);
+          
+          if (!error && data && data.length > 0) {
+            batchData = data[0];
+            console.log('✅ Found batch by blockchain ID:', batchData.id);
+          }
+        }
+        
+        // Try by IPFS hash
+        if (!batchData && searchId.length > 20) {
+          console.log('🔍 Trying IPFS hash:', searchId);
+          const { data, error } = await supabase
+            .from('batches')
+            .select('*')
+            .or(`ipfs_hash.eq.${searchId},ipfs_certificate_hash.eq.${searchId}`)
+            .limit(1);
+          
+          if (!error && data && data.length > 0) {
+            batchData = data[0];
+            console.log('✅ Found batch by IPFS hash:', batchData.id);
+          }
+        }
+        
+        if (batchData) {
+          setBatch(batchData);
+          
+          // If batch has group_id, fetch all certificates
+          if (batchData.group_id) {
+            await fetchGroupCertificates(batchData.group_id);
+          }
+          
+          toast({
+            title: "Batch found",
+            description: "Batch information loaded successfully.",
+          });
+        } else {
+          console.error('❌ No batch found. Searched with:', {
+            searchId,
+            isUUID,
+            isNumber: !isNaN(Number(searchId)),
+            length: searchId.length,
+            parsedQR
+          });
+          throw new Error(`No batch found with this ID. Searched: ${searchId}`);
+        }
       }
-
-      if (error || !data) {
-        throw new Error('Batch not found');
-      }
-
-      setBatch(data);
-      toast({
-        title: "Batch found",
-        description: "Batch information loaded successfully.",
-      });
     } catch (error) {
+      console.error('Search error:', error);
       toast({
         variant: "destructive",
-        title: "Batch not found",
-        description: "No batch found with this ID. Please check and try again.",
+        title: "Not found",
+        description: error instanceof Error ? error.message : "No batch or group found with this ID.",
       });
       setBatch(null);
+      setBatches([]);
+      setCertificates([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchGroupCertificates = async (groupId: string): Promise<number> => {
+    try {
+      console.log('🔍 Fetching certificates for group:', groupId);
+      
+      // Fetch from group_files table
+      const { data: groupFiles, error: filesError } = await supabase
+        .from('group_files')
+        .select('*')
+        .eq('group_id', groupId)
+        .order('created_at', { ascending: true });
+      
+      if (!filesError && groupFiles && groupFiles.length > 0) {
+        console.log(`✅ Found ${groupFiles.length} certificates in database`);
+        setCertificates(groupFiles);
+        return groupFiles.length;
+      }
+      
+      // If no files in database, try using SingleStepGroupManager
+      try {
+        const { singleStepGroupManager } = await import('@/utils/singleStepGroupManager');
+        const pinataCertificates = await singleStepGroupManager.getGroupCertificates(groupId);
+        
+        if (pinataCertificates && pinataCertificates.length > 0) {
+          console.log(`✅ Found ${pinataCertificates.length} certificates from Pinata`);
+          // Transform Pinata format to our format
+          const transformed = pinataCertificates.map((cert: any) => ({
+            id: cert.ipfs_pin_hash || cert.id,
+            file_name: cert.metadata?.name || cert.file_name || 'Certificate',
+            ipfs_hash: cert.ipfs_pin_hash || cert.ipfs_hash,
+            file_size: cert.size || cert.file_size || 0,
+            transaction_type: cert.metadata?.keyvalues?.transactionType || cert.transaction_type || 'HARVEST',
+            created_at: cert.date_pinned || cert.created_at,
+            metadata: cert.metadata
+          }));
+          setCertificates(transformed);
+          return transformed.length;
+        }
+      } catch (pinataError) {
+        console.warn('Could not fetch from Pinata:', pinataError);
+      }
+      
+      setCertificates([]);
+      return 0;
+    } catch (error) {
+      console.error('Error fetching group certificates:', error);
+      setCertificates([]);
+      return 0;
     }
   };
 
@@ -151,6 +323,299 @@ export const TrackProducts = () => {
     }
   };
 
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast({
+        variant: "destructive",
+        title: "Invalid File",
+        description: "Please upload an image file (JPG, PNG, etc.)",
+      });
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        variant: "destructive",
+        title: "File Too Large",
+        description: "Please upload an image smaller than 5MB",
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imageDataUrl = e.target?.result as string;
+      setUploadedImage(imageDataUrl);
+      verifyUploadedImage(imageDataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const verifyUploadedImage = async (imageDataUrl: string) => {
+    setVerifying(true);
+    setVerificationResult(null);
+
+    try {
+      toast({
+        title: "Processing Image",
+        description: "Extracting QR code data from uploaded image...",
+      });
+
+      // Extract QR code from uploaded image
+      const qrData = await extractQRFromImage(imageDataUrl);
+      
+      if (qrData) {
+        // Verify the QR code data
+        await verifyQRCodeData(qrData);
+      } else {
+        setVerificationResult({
+          isValid: false,
+          message: "No QR code found in the uploaded image. Please ensure the image contains a clear QR code.",
+        });
+      }
+    } catch (error) {
+      console.error('Error verifying image:', error);
+      setVerificationResult({
+        isValid: false,
+        message: `Verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const extractQRFromImage = async (imageDataUrl: string): Promise<string | null> => {
+    try {
+      // Use qr-scanner library (same as UnifiedVerificationSystem)
+      const QrScanner = (await import('qr-scanner')).default;
+      
+      // Scan the QR code from the image
+      const result = await QrScanner.scanImage(imageDataUrl, {
+        returnDetailedScanResult: true
+      });
+      
+      if (result && result.data) {
+        console.log('✅ QR Code detected:', result.data);
+        return result.data;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error extracting QR code:', error);
+      // If QR scanner fails, try to extract text from image (OCR would be needed)
+      return null;
+    }
+  };
+
+  const verifyQRCodeData = async (qrData: string) => {
+    try {
+      // Parse QR code data - it might be JSON
+      let parsedData: any = null;
+      let searchId = qrData;
+      
+      try {
+        parsedData = JSON.parse(qrData);
+        console.log('✅ Parsed QR code JSON:', parsedData);
+        
+        // Extract ID from parsed data
+        if (parsedData.batchId) {
+          searchId = parsedData.batchId;
+        } else if (parsedData.id) {
+          searchId = parsedData.id;
+        } else if (parsedData.groupId || parsedData.group_id) {
+          searchId = parsedData.groupId || parsedData.group_id;
+        } else if (parsedData.verificationUrl) {
+          // Extract from verification URL
+          const match = parsedData.verificationUrl.match(/batchId=([^&]+)/);
+          if (match) searchId = match[1];
+        }
+      } catch (e) {
+        // Not JSON, check if it's a URL
+        if (qrData.includes('verify?batchId=')) {
+          const match = qrData.match(/batchId=([^&]+)/);
+          if (match) searchId = match[1];
+        } else if (qrData.includes('gateway.pinata.cloud/ipfs/')) {
+          const match = qrData.match(/ipfs\/([^/?]+)/);
+          if (match) searchId = match[1];
+        }
+      }
+
+      console.log('🔍 Searching with ID:', searchId);
+
+      // Check if it's a group_id (UUID format: 8-4-4-4-12 characters with dashes)
+      // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars)
+      const isGroupId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchId);
+      
+      if (isGroupId) {
+        // Search by group_id - fetch ALL batches
+        console.log('🔍 Searching by Group ID:', searchId);
+        setIsGroupSearch(true);
+        
+        const { data: groupBatches, error: groupError } = await supabase
+          .from('batches')
+          .select('*')
+          .eq('group_id', searchId);
+        
+        if (groupError || !groupBatches || groupBatches.length === 0) {
+          throw new Error('No batches found for this Group ID');
+        }
+        
+        setBatches(groupBatches);
+        setBatch(groupBatches[0]);
+        
+        // Fetch all certificates and get count
+        const certCount = await fetchGroupCertificates(searchId);
+        
+        setVerificationResult({
+          isValid: true,
+          message: `✅ Group verified! Found ${groupBatches.length} batch(es) and ${certCount} certificate(s).`,
+          batchId: groupBatches[0].id,
+          blockchainId: groupBatches[0].blockchain_id || groupBatches[0].blockchain_batch_id,
+          groupId: searchId,
+        });
+        
+        toast({
+          title: "✅ Verification Successful",
+          description: `Group verified with ${groupBatches.length} batch(es).`,
+        });
+      } else {
+        // Search by batch ID - try multiple methods
+        let batchData = null;
+
+        // First, try by UUID (most common case for batch IDs)
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchId);
+        if (isUUID) {
+          console.log('🔍 Trying UUID batch ID:', searchId);
+          const { data, error } = await supabase
+            .from('batches')
+            .select('*')
+            .eq('id', searchId)
+            .limit(1);
+          
+          if (!error && data && data.length > 0) {
+            batchData = data[0];
+            console.log('✅ Found batch by UUID:', batchData.id);
+          }
+        }
+        
+        // Try by integer ID (if it's a number)
+        if (!batchData && !isNaN(Number(searchId)) && Number(searchId) > 0) {
+          console.log('🔍 Trying integer batch ID:', searchId);
+          const { data, error } = await supabase
+            .from('batches')
+            .select('*')
+            .eq('id', parseInt(searchId))
+            .limit(1);
+          
+          if (!error && data && data.length > 0) {
+            batchData = data[0];
+            console.log('✅ Found batch by integer ID:', batchData.id);
+          }
+        }
+        
+        // Try by blockchain IDs
+        if (!batchData) {
+          console.log('🔍 Trying blockchain IDs:', searchId);
+          const { data, error } = await supabase
+            .from('batches')
+            .select('*')
+            .or(`blockchain_id.eq.${searchId},blockchain_batch_id.eq.${searchId}`)
+            .limit(1);
+          
+          if (!error && data && data.length > 0) {
+            batchData = data[0];
+            console.log('✅ Found batch by blockchain ID:', batchData.id);
+          }
+        }
+        
+        // Try by group_id (in case QR code has group ID but not UUID format)
+        if (!batchData) {
+          console.log('🔍 Trying group_id:', searchId);
+          const { data, error } = await supabase
+            .from('batches')
+            .select('*')
+            .eq('group_id', searchId)
+            .limit(1);
+          
+          if (!error && data && data.length > 0) {
+            batchData = data[0];
+            console.log('✅ Found batch by group_id:', batchData.id);
+          }
+        }
+        
+        // Try by IPFS hash
+        if (!batchData && searchId.length > 20) {
+          console.log('🔍 Trying IPFS hash:', searchId);
+          const { data, error } = await supabase
+            .from('batches')
+            .select('*')
+            .or(`ipfs_hash.eq.${searchId},ipfs_certificate_hash.eq.${searchId}`)
+            .limit(1);
+          
+          if (!error && data && data.length > 0) {
+            batchData = data[0];
+            console.log('✅ Found batch by IPFS hash:', batchData.id);
+          }
+        }
+
+        if (batchData) {
+          setBatch(batchData);
+          
+          // If batch has group_id, fetch all certificates
+          if (batchData.group_id) {
+            await fetchGroupCertificates(batchData.group_id);
+          }
+          
+          setVerificationResult({
+            isValid: true,
+            message: "✅ Certificate verified successfully! Batch information loaded.",
+            batchId: batchData.id,
+            blockchainId: batchData.blockchain_id || batchData.blockchain_batch_id,
+            groupId: batchData.group_id,
+          });
+          
+          toast({
+            title: "✅ Verification Successful",
+            description: "Certificate verified and batch information loaded.",
+          });
+        } else {
+          console.error('❌ No batch found. Searched with:', {
+            searchId,
+            isUUID,
+            isNumber: !isNaN(Number(searchId)),
+            length: searchId.length,
+            parsedData
+          });
+          throw new Error(`No matching batch found in the system. Searched with: ${searchId}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error verifying QR code data:', error);
+      setVerificationResult({
+        isValid: false,
+        message: `Verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      });
+      toast({
+        variant: "destructive",
+        title: "Verification Failed",
+        description: error instanceof Error ? error.message : 'Unknown error occurred',
+      });
+    }
+  };
+
+  const clearUploadedImage = () => {
+    setUploadedImage(null);
+    setVerificationResult(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white py-12">
       <div className="container mx-auto px-4 max-w-4xl">
@@ -170,20 +635,22 @@ export const TrackProducts = () => {
               Product Tracking
             </CardTitle>
             <CardDescription>
-              Search by batch ID, QR code, or scan a product code to view complete traceability information.
+              Search by batch ID, QR code, or upload a photo of QR code/certificate to verify authenticity.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-6">
+            {/* Manual Input */}
             <div className="flex gap-4">
               <div className="flex-1">
                 <Label htmlFor="batch-id" className="text-sm font-medium">
-                  Batch ID or QR Code
+                  Batch ID, Group ID, or QR Code
                 </Label>
                 <Input
                   id="batch-id"
-                  placeholder="Enter Batch ID or QR Code..."
+                  placeholder="Enter Batch ID, Group ID, Blockchain ID, or QR Code..."
                   value={batchId}
                   onChange={(e) => setBatchId(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
                   className="mt-1"
                 />
               </div>
@@ -198,24 +665,324 @@ export const TrackProducts = () => {
                 </Button>
               </div>
             </div>
+
+            {/* Divider */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white px-2 text-muted-foreground">Or</span>
+              </div>
+            </div>
+
+            {/* Photo Upload Section */}
+            <div className="space-y-4">
+              <Label className="text-sm font-medium flex items-center gap-2">
+                <Camera className="h-4 w-4" />
+                Upload QR Code or Certificate Photo
+              </Label>
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
+                {!uploadedImage ? (
+                  <div className="text-center space-y-4">
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
+                        <Upload className="h-8 w-8 text-primary" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">Upload QR Code or Certificate</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Upload a photo of the QR code or certificate for automatic verification
+                        </p>
+                      </div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        className="hidden"
+                        id="qr-upload"
+                      />
+                      <Button
+                        variant="outline"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={verifying}
+                      >
+                        <Upload className="mr-2 h-4 w-4" />
+                        {verifying ? 'Processing...' : 'Choose Image'}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="relative">
+                      <img
+                        src={uploadedImage}
+                        alt="Uploaded QR code"
+                        className="max-h-64 mx-auto rounded-lg border"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="absolute top-2 right-2"
+                        onClick={clearUploadedImage}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {verifying && (
+                      <div className="text-center">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                        <p className="text-sm text-muted-foreground">Scanning QR code and verifying...</p>
+                      </div>
+                    )}
+                    {verificationResult && (
+                      <div className={`p-4 rounded-lg border ${
+                        verificationResult.isValid 
+                          ? 'bg-green-50 border-green-200' 
+                          : 'bg-red-50 border-red-200'
+                      }`}>
+                        <div className="flex items-start gap-3">
+                          {verificationResult.isValid ? (
+                            <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                          ) : (
+                            <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
+                          )}
+                          <div className="flex-1">
+                            <p className={`font-medium ${
+                              verificationResult.isValid ? 'text-green-900' : 'text-red-900'
+                            }`}>
+                              {verificationResult.isValid ? 'Verification Successful' : 'Verification Failed'}
+                            </p>
+                            <p className={`text-sm mt-1 ${
+                              verificationResult.isValid ? 'text-green-700' : 'text-red-700'
+                            }`}>
+                              {verificationResult.message}
+                            </p>
+                            {verificationResult.isValid && verificationResult.batchId && (
+                              <div className="mt-3 space-y-1 text-xs">
+                                <p className="text-green-800">
+                                  <strong>Batch ID:</strong> {verificationResult.batchId}
+                                </p>
+                                {verificationResult.blockchainId && (
+                                  <p className="text-green-800">
+                                    <strong>Blockchain ID:</strong> {verificationResult.blockchainId}
+                                  </p>
+                                )}
+                                {verificationResult.groupId && (
+                                  <p className="text-green-800">
+                                    <strong>Group ID:</strong> {verificationResult.groupId}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           </CardContent>
         </Card>
 
         {/* Results Section */}
         {batch && (
-          <Card className="govt-card">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-xl">Product Information</CardTitle>
-                  <CardDescription>Batch ID: {batch.id}</CardDescription>
+          <>
+            {/* Group Information (if group search) */}
+            {isGroupSearch && batches.length > 1 && (
+              <Card className="govt-card mb-4 border-blue-200 bg-blue-50/50">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Package className="h-5 w-5 text-blue-600" />
+                    Group Information
+                  </CardTitle>
+                  <CardDescription>
+                    Found {batches.length} batch(es) in this group
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm">Group ID:</span>
+                      <code className="text-xs bg-white px-2 py-1 rounded border">{batch.group_id}</code>
+                    </div>
+                    {certificates.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">Certificates:</span>
+                        <Badge variant="outline" className="bg-white">
+                          {certificates.length} certificate(s)
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* All Batches in Group */}
+            {isGroupSearch && batches.length > 1 && (
+              <Card className="govt-card mb-4">
+                <CardHeader>
+                  <CardTitle className="text-lg">All Batches in Group</CardTitle>
+                  <CardDescription>
+                    Complete list of batches associated with this group
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {batches.map((b, idx) => (
+                      <Card key={b.id} className={b.id === batch.id ? 'border-blue-300 bg-blue-50/30' : ''}>
+                        <CardContent className="pt-4">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="font-semibold">
+                                  Batch {idx + 1}: {b.crop_type} - {b.variety}
+                                </span>
+                                {b.id === batch.id && (
+                                  <Badge variant="outline" className="text-xs bg-blue-100">
+                                    Primary
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                                <div>
+                                  <span className="font-medium">Batch ID:</span>
+                                  <code className="ml-1 bg-muted px-1 rounded">{b.id}</code>
+                                </div>
+                                <div>
+                                  <span className="font-medium">Quantity:</span> {b.harvest_quantity} kg
+                                </div>
+                                <div>
+                                  <span className="font-medium">Grade:</span> {b.grading}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Status:</span> {b.status}
+                                </div>
+                              </div>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setBatch(b)}
+                            >
+                              View Details
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Certificates Section */}
+            {certificates.length > 0 && (
+              <Card className="govt-card mb-4 border-green-200">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileCheck className="h-5 w-5 text-green-600" />
+                    Certificates ({certificates.length})
+                  </CardTitle>
+                  <CardDescription>
+                    All certificates associated with this group
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {certificates.map((cert, idx) => (
+                      <Card key={cert.id || idx} className="border-green-100">
+                        <CardContent className="pt-4">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <FileCheck className="h-4 w-4 text-green-600" />
+                                <span className="font-semibold">
+                                  Certificate {idx + 1}: {cert.file_name || cert.metadata?.name || 'Certificate'}
+                                </span>
+                                <Badge variant="outline" className="text-xs">
+                                  {cert.transaction_type || cert.metadata?.keyvalues?.transactionType || 'HARVEST'}
+                                </Badge>
+                              </div>
+                              <div className="space-y-1 text-xs text-muted-foreground">
+                                {cert.ipfs_hash && (
+                                  <div>
+                                    <span className="font-medium">IPFS Hash:</span>
+                                    <code className="ml-1 bg-muted px-1 rounded text-[10px]">
+                                      {cert.ipfs_hash.substring(0, 20)}...
+                                    </code>
+                                  </div>
+                                )}
+                                {cert.created_at && (
+                                  <div>
+                                    <span className="font-medium">Created:</span>{' '}
+                                    {new Date(cert.created_at).toLocaleDateString()}
+                                  </div>
+                                )}
+                                {cert.file_size && (
+                                  <div>
+                                    <span className="font-medium">Size:</span> {(cert.file_size / 1024).toFixed(2)} KB
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            {cert.ipfs_hash && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.open(`https://gateway.pinata.cloud/ipfs/${cert.ipfs_hash}`, '_blank')}
+                              >
+                                <ExternalLink className="h-4 w-4 mr-2" />
+                                View
+                              </Button>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Primary Batch Information */}
+            <Card className="govt-card">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-xl">
+                      {isGroupSearch ? 'Primary Batch Information' : 'Product Information'}
+                    </CardTitle>
+                    <CardDescription className="space-y-1 mt-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">Batch ID:</span>
+                        <code className="text-xs bg-muted px-2 py-1 rounded font-mono">{batch.id}</code>
+                      </div>
+                      {batch.group_id && (
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">Group ID:</span>
+                          <code className="text-xs bg-muted px-2 py-1 rounded font-mono">{batch.group_id}</code>
+                        </div>
+                      )}
+                      {(batch.blockchain_id || batch.blockchain_batch_id) && (
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">Blockchain ID:</span>
+                          <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
+                            {batch.blockchain_id || batch.blockchain_batch_id}
+                          </code>
+                        </div>
+                      )}
+                    </CardDescription>
+                  </div>
+                  <Badge variant="outline" className="text-success border-success">
+                    <Shield className="w-3 h-3 mr-1" />
+                    Verified
+                  </Badge>
                 </div>
-                <Badge variant="outline" className="text-success border-success">
-                  <Shield className="w-3 h-3 mr-1" />
-                  Verified
-                </Badge>
-              </div>
-            </CardHeader>
+              </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid md:grid-cols-2 gap-6">
                 <div className="space-y-4">
@@ -280,51 +1047,45 @@ export const TrackProducts = () => {
                   </div>
 
                   <div>
-                    <h3 className="font-semibold mb-2">Certification</h3>
-                    <div className="space-y-2">
-                      <div className="flex items-center text-sm">
-                        <Award className="w-4 h-4 mr-2 text-muted-foreground" />
-                        <span className="font-medium">Certification:</span>
-                        <span className="ml-2">{batch.certification || 'Standard'}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-2 mt-2">
+                    <h3 className="font-semibold mb-2">Certificate Actions</h3>
+                    <div className="flex flex-wrap gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={handleDownloadCertificate}
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        Download Certificate
+                      </Button>
+                      
+                      {(batch.blockchain_id || batch.blockchain_batch_id) && (
                         <Button 
                           variant="outline" 
                           size="sm" 
-                          onClick={handleDownloadCertificate}
+                          onClick={handleVerifyCertificate}
                         >
-                          <Download className="w-4 h-4 mr-2" />
-                          Download Certificate
+                          <CheckCircle className="w-4 h-4 mr-2" />
+                          Verify on Blockchain
                         </Button>
-                        
-                        {(batch.blockchain_id || batch.blockchain_batch_id) && (
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={handleVerifyCertificate}
-                          >
-                            <CheckCircle className="w-4 h-4 mr-2" />
-                            Verify
-                          </Button>
-                        )}
-                        
-                        {(batch.ipfs_hash || batch.ipfs_certificate_hash) && (
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={handleViewCertificate}
-                          >
-                            <ExternalLink className="w-4 h-4 mr-2" />
-                            View Certificate
-                          </Button>
-                        )}
-                      </div>
+                      )}
+                      
+                      {(batch.ipfs_hash || batch.ipfs_certificate_hash) && (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={handleViewCertificate}
+                        >
+                          <ExternalLink className="w-4 h-4 mr-2" />
+                          View Certificate
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
             </CardContent>
           </Card>
+          </>
         )}
 
         {/* How It Works Section */}

@@ -129,9 +129,75 @@ Instructions:
       jsonText = jsonMatch[0];
     }
 
+    // Clean and repair JSON - escape control characters in string values
+    // This function properly escapes newlines, tabs, and other control characters
+    const repairJSON = (jsonString: string): string => {
+      try {
+        // First, try to parse as-is
+        JSON.parse(jsonString);
+        return jsonString;
+      } catch (e) {
+        // If parsing fails, repair it by properly escaping control characters
+        let repaired = '';
+        let inString = false;
+        let escapeNext = false;
+        
+        for (let i = 0; i < jsonString.length; i++) {
+          const char = jsonString[i];
+          const nextChar = jsonString[i + 1];
+          
+          if (escapeNext) {
+            repaired += char;
+            escapeNext = false;
+            continue;
+          }
+          
+          if (char === '\\') {
+            repaired += char;
+            escapeNext = true;
+            continue;
+          }
+          
+          if (char === '"') {
+            inString = !inString;
+            repaired += char;
+            continue;
+          }
+          
+          if (inString) {
+            // Inside a string, escape control characters
+            if (char === '\n') {
+              repaired += '\\n';
+            } else if (char === '\r') {
+              repaired += '\\r';
+            } else if (char === '\t') {
+              repaired += '\\t';
+            } else if (char === '\f') {
+              repaired += '\\f';
+            } else if (char === '\b') {
+              repaired += '\\b';
+            } else if (char === '\v') {
+              repaired += '\\v';
+            } else if (char.charCodeAt(0) < 32) {
+              // Escape any other control character
+              repaired += '\\u' + ('0000' + char.charCodeAt(0).toString(16)).slice(-4);
+            } else {
+              repaired += char;
+            }
+          } else {
+            repaired += char;
+          }
+        }
+        
+        return repaired;
+      }
+    };
+
     // Parse JSON
     let analysisData: CropQualityAnalysisResponse;
     try {
+      // Try parsing the cleaned JSON
+      jsonText = repairJSON(jsonText);
       analysisData = JSON.parse(jsonText);
       console.log('✅ Successfully parsed Gemini crop quality analysis:', analysisData);
       
@@ -155,7 +221,51 @@ Instructions:
     } catch (parseError) {
       console.error('❌ Failed to parse Gemini JSON:', parseError);
       console.error('❌ Raw response text:', responseText.substring(0, 500));
-      throw new Error(`Failed to parse Gemini API response. Please ensure Gemini API is working correctly. Error: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+      console.error('❌ Extracted JSON text:', jsonText.substring(0, 500));
+      console.error('❌ Parse error details:', parseError instanceof Error ? parseError.message : 'Unknown error');
+      
+      // Try one more time with a simpler repair - manually escape control chars in string values
+      try {
+        let simpleRepair = '';
+        let inString = false;
+        let escapeNext = false;
+        
+        for (let i = 0; i < jsonText.length; i++) {
+          const char = jsonText[i];
+          
+          if (escapeNext) {
+            simpleRepair += char;
+            escapeNext = false;
+            continue;
+          }
+          
+          if (char === '\\') {
+            simpleRepair += char;
+            escapeNext = true;
+            continue;
+          }
+          
+          if (char === '"') {
+            inString = !inString;
+            simpleRepair += char;
+            continue;
+          }
+          
+          if (inString && (char === '\n' || char === '\r' || char === '\t')) {
+            if (char === '\n') simpleRepair += '\\n';
+            else if (char === '\r') simpleRepair += '\\r';
+            else if (char === '\t') simpleRepair += '\\t';
+          } else {
+            simpleRepair += char;
+          }
+        }
+        
+        analysisData = JSON.parse(simpleRepair);
+        console.log('✅ Successfully parsed after simple repair');
+      } catch (secondError) {
+        console.error('❌ Second parse attempt also failed:', secondError);
+        throw new Error(`Failed to parse Gemini API response. Please ensure Gemini API is working correctly. Error: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+      }
     }
 
     // Ensure arrays are arrays

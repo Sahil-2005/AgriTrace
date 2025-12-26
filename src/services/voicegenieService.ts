@@ -249,7 +249,9 @@ async function saveCallToCache(rawCall: VoiceGenieApiRawCall, mappedCall: VoiceG
       call_id: cacheData.call_id,
       gemini_extracted: cacheData.gemini_extracted,
       collected_data_keys: cacheData.collected_data ? Object.keys(cacheData.collected_data) : [],
-      collected_data_sample: cacheData.collected_data ? JSON.stringify(cacheData.collected_data).substring(0, 200) : 'empty'
+      cropType: cacheData.collected_data?.cropType,
+      variety: cacheData.collected_data?.variety,
+      collected_data_full: cacheData.collected_data ? JSON.stringify(cacheData.collected_data, null, 2) : 'empty'
     });
     
     // Try to insert first
@@ -305,6 +307,12 @@ async function mapRawCallToVoiceGenieCall(rawCall: VoiceGenieApiRawCall): Promis
   const cachedData = await getCachedCallData(rawCall._id);
   if (cachedData && cachedData.gemini_extracted && cachedData.collected_data) {
     console.log('✅ Using cached data (Gemini already extracted)');
+    console.log('📊 Cached collected_data:', {
+      keys: Object.keys(cachedData.collected_data || {}),
+      cropType: cachedData.collected_data?.cropType,
+      variety: cachedData.collected_data?.variety,
+      fullData: JSON.stringify(cachedData.collected_data, null, 2)
+    });
     return {
       id: cachedData.call_id,
       phone: cachedData.phone_number,
@@ -371,10 +379,19 @@ async function mapRawCallToVoiceGenieCall(rawCall: VoiceGenieApiRawCall): Promis
   }
   
   // Priority 1: Extract structured data from JSON (efficient extraction)
+  // Only merge if Gemini hasn't already extracted (to preserve Gemini data)
   const jsonExtractedData = extractStructuredDataFromJson(rawCall);
   if (Object.keys(jsonExtractedData).length > 0) {
     console.log('📋 Extracted data from JSON:', jsonExtractedData);
-    Object.assign(collectedData, jsonExtractedData);
+    // Only merge fields that don't already exist (don't overwrite Gemini data)
+    Object.keys(jsonExtractedData).forEach(key => {
+      if (!collectedData[key] || (geminiExtracted && ['cropType', 'variety', 'harvestQuantity', 'sowingDate', 'harvestDate', 'pricePerKg'].includes(key))) {
+        // If Gemini extracted, don't overwrite critical fields
+        if (!geminiExtracted || !['cropType', 'variety', 'harvestQuantity', 'sowingDate', 'harvestDate', 'pricePerKg'].includes(key)) {
+          collectedData[key] = jsonExtractedData[key];
+        }
+      }
+    });
   }
   
   // Priority 2: Extract from answersToQuestion (most structured data)
@@ -411,14 +428,26 @@ async function mapRawCallToVoiceGenieCall(rawCall: VoiceGenieApiRawCall): Promis
   }
   
   // Priority 3: Extract from top-level answers field
+  // Only merge if Gemini hasn't already extracted critical fields
   if (rawCall.answers) {
     console.log('📋 Found answers field:', rawCall.answers);
+    const mergeAnswers = (answers: any) => {
+      Object.keys(answers).forEach(key => {
+        // If Gemini extracted, don't overwrite critical fields
+        if (!geminiExtracted || !['cropType', 'variety', 'harvestQuantity', 'sowingDate', 'harvestDate', 'pricePerKg'].includes(key)) {
+          if (!collectedData[key]) {
+            collectedData[key] = answers[key];
+          }
+        }
+      });
+    };
+    
     if (typeof rawCall.answers === 'object' && !Array.isArray(rawCall.answers)) {
-      Object.assign(collectedData, rawCall.answers);
+      mergeAnswers(rawCall.answers);
     } else if (Array.isArray(rawCall.answers)) {
       rawCall.answers.forEach((answer: any) => {
         if (typeof answer === 'object') {
-          Object.assign(collectedData, answer);
+          mergeAnswers(answer);
         }
       });
     }
@@ -522,11 +551,23 @@ async function mapRawCallToVoiceGenieCall(rawCall: VoiceGenieApiRawCall): Promis
     delete collectedData.geminiConfidence;
   }
   
+  // Ensure cropType and variety are preserved if they exist
+  if (geminiExtracted) {
+    console.log('🔒 Gemini extracted - preserving critical fields:', {
+      cropType: collectedData.cropType,
+      variety: collectedData.variety,
+      hasCropType: !!collectedData.cropType,
+      hasVariety: !!collectedData.variety
+    });
+  }
+  
   console.log('✅ Mapped collectedData:', collectedData);
   console.log('✅ Confidence score:', confidenceScore);
   console.log('✅ Gemini extracted:', geminiExtracted);
   console.log('📊 Final collectedData keys:', Object.keys(collectedData));
   console.log('📊 Final collectedData:', JSON.stringify(collectedData, null, 2));
+  console.log('🔍 CropType value:', collectedData.cropType, 'Type:', typeof collectedData.cropType);
+  console.log('🔍 Variety value:', collectedData.variety, 'Type:', typeof collectedData.variety);
   
   const mappedCall: VoiceGenieCall = {
     id: rawCall._id,

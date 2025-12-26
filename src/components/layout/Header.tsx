@@ -47,8 +47,15 @@ export const Header = () => {
   }, [user, profile]);
 
   const handleSignOut = async () => {
-    await signOut();
-    navigate('/');
+    try {
+      await signOut();
+    } catch (error) {
+      console.error('Error during sign out:', error);
+      // Even if signOut fails, navigate away (local state is cleared)
+    } finally {
+      // Always navigate to home page after sign out attempt
+      navigate('/');
+    }
   };
 
   return (

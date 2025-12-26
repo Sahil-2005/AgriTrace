@@ -80,6 +80,9 @@ export const HelperDesk = () => {
           farmerName: call.farmerName,
           hasCollectedData: !!call.collectedData,
           collectedDataKeys: call.collectedData ? Object.keys(call.collectedData) : [],
+          cropType: call.collectedData?.cropType,
+          variety: call.collectedData?.variety,
+          fullCollectedData: call.collectedData ? JSON.stringify(call.collectedData, null, 2) : 'No data',
           confidenceScore: call.confidenceScore
         });
       });
@@ -590,7 +593,22 @@ export const HelperDesk = () => {
                         {/* Essential Fields for Batch Registration - Prominently Displayed */}
                         <div className="mb-6">
                           <h4 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Essential Batch Registration Fields</h4>
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+                            {/* Crop Type */}
+                            <div className="p-4 rounded-lg bg-gradient-to-br from-blue-50 to-blue-100/50 border-2 border-blue-300">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Package className="h-4 w-4 text-blue-600" />
+                                <div className="text-xs font-bold text-blue-700 uppercase tracking-wide">Crop Type *</div>
+                              </div>
+                              <div className="text-lg font-bold text-blue-900">
+                                {call.collectedData?.cropType && String(call.collectedData.cropType).trim() ? (
+                                  String(call.collectedData.cropType).trim()
+                                ) : (
+                                  <span className="text-red-500 text-sm font-normal">Missing</span>
+                                )}
+                              </div>
+                            </div>
+                            
                             {/* Variety */}
                             <div className="p-4 rounded-lg bg-gradient-to-br from-green-50 to-green-100/50 border-2 border-green-300">
                               <div className="flex items-center gap-2 mb-2">
@@ -598,7 +616,11 @@ export const HelperDesk = () => {
                                 <div className="text-xs font-bold text-green-700 uppercase tracking-wide">Variety *</div>
                               </div>
                               <div className="text-lg font-bold text-green-900">
-                                {call.collectedData.variety || <span className="text-red-500 text-sm">Missing</span>}
+                                {call.collectedData?.variety && String(call.collectedData.variety).trim() ? (
+                                  String(call.collectedData.variety).trim()
+                                ) : (
+                                  <span className="text-red-500 text-sm font-normal">Missing</span>
+                                )}
                               </div>
                             </div>
                             
@@ -657,16 +679,10 @@ export const HelperDesk = () => {
                         </div>
 
                         {/* Additional Fields */}
-                        {(call.collectedData.cropType || call.collectedData.certification || call.collectedData.grading) && (
+                        {(call.collectedData.certification || call.collectedData.grading || call.collectedData.farmLocation) && (
                           <div className="mb-6">
                             <h4 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Additional Information</h4>
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                              {call.collectedData.cropType && (
-                                <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
-                                  <div className="text-xs font-medium text-gray-600 uppercase tracking-wide mb-1">Crop Type</div>
-                                  <div className="text-base font-semibold text-gray-900">{call.collectedData.cropType}</div>
-                                </div>
-                              )}
                               {call.collectedData.certification && (
                                 <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
                                   <div className="text-xs font-medium text-gray-600 uppercase tracking-wide mb-1">Certification</div>
@@ -677,6 +693,12 @@ export const HelperDesk = () => {
                                 <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
                                   <div className="text-xs font-medium text-gray-600 uppercase tracking-wide mb-1">Grading</div>
                                   <div className="text-base font-semibold text-gray-900">{call.collectedData.grading}</div>
+                                </div>
+                              )}
+                              {call.collectedData.farmLocation && (
+                                <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
+                                  <div className="text-xs font-medium text-gray-600 uppercase tracking-wide mb-1">Farm Location</div>
+                                  <div className="text-base font-semibold text-gray-900">{call.collectedData.farmLocation}</div>
                                 </div>
                               )}
                             </div>
@@ -858,16 +880,28 @@ export const HelperDesk = () => {
                       <div className="p-4 rounded-lg bg-gradient-to-br from-blue-50 to-blue-100/50 border border-blue-200">
                         <div className="flex items-center gap-2 mb-2">
                           <Package className="h-4 w-4 text-blue-600" />
-                          <div className="text-xs font-medium text-blue-700 uppercase tracking-wide">Crop Type</div>
+                          <div className="text-xs font-medium text-blue-700 uppercase tracking-wide">Crop Type *</div>
                         </div>
-                        <div className="text-lg font-bold text-blue-900">{selectedCall.collectedData.cropType || 'N/A'}</div>
+                        <div className="text-lg font-bold text-blue-900">
+                          {selectedCall.collectedData?.cropType ? (
+                            selectedCall.collectedData.cropType
+                          ) : (
+                            <span className="text-red-500 text-sm font-normal">Missing</span>
+                          )}
+                        </div>
                       </div>
                       <div className="p-4 rounded-lg bg-gradient-to-br from-green-50 to-green-100/50 border border-green-200">
                         <div className="flex items-center gap-2 mb-2">
                           <Leaf className="h-4 w-4 text-green-600" />
-                          <div className="text-xs font-medium text-green-700 uppercase tracking-wide">Variety</div>
+                          <div className="text-xs font-medium text-green-700 uppercase tracking-wide">Variety *</div>
                         </div>
-                        <div className="text-lg font-bold text-green-900">{selectedCall.collectedData.variety || 'N/A'}</div>
+                        <div className="text-lg font-bold text-green-900">
+                          {selectedCall.collectedData?.variety ? (
+                            selectedCall.collectedData.variety
+                          ) : (
+                            <span className="text-red-500 text-sm font-normal">Missing</span>
+                          )}
+                        </div>
                       </div>
                       <div className="p-4 rounded-lg bg-gradient-to-br from-purple-50 to-purple-100/50 border border-purple-200">
                         <div className="flex items-center gap-2 mb-2">
