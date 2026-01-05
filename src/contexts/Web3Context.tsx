@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { ethers } from 'ethers';
 import { CONTRACT_ADDRESS, NETWORK_CONFIG, DEFAULT_NETWORK } from '@/contracts/config';
 import AgriTraceABI from '@/contracts/AgriTrace.json';
-import { initializeBlockchainManager, blockchainTransactionManager } from '@/utils/blockchainTransactionManager';
+import { initializeBlockchainManager, clearBlockchainManager } from '@/utils/blockchainTransactionManager';
 
 interface Web3ContextType {
   provider: ethers.BrowserProvider | null;
@@ -168,7 +168,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
     setCurrentNetwork(DEFAULT_NETWORK);
     
     // Clear blockchain manager
-    blockchainTransactionManager = null as any;
+    clearBlockchainManager();
   };
 
   const switchNetwork = async (networkName: string) => {

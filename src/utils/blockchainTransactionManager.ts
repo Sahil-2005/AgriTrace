@@ -295,9 +295,14 @@ export class BlockchainTransactionManager {
 }
 
 // Export singleton instance - will be initialized with MetaMask provider
-export let blockchainTransactionManager: BlockchainTransactionManager;
+export let blockchainTransactionManager: BlockchainTransactionManager | null = null;
 
 // Initialize with MetaMask provider when available
 export const initializeBlockchainManager = (provider: ethers.Provider, signer?: ethers.Signer) => {
   blockchainTransactionManager = new BlockchainTransactionManager(provider, signer);
+};
+
+// Clear the blockchain manager (for wallet disconnect)
+export const clearBlockchainManager = () => {
+  blockchainTransactionManager = null;
 };
